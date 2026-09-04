@@ -1,6 +1,6 @@
 # India Government & MSME Scheme Recommendation Platform — Backend Foundation
 
-A production-ready FastAPI backend and deterministic rule-based eligibility engine for Indian Government and MSME schemes. This service connects to a local PostgreSQL database (`goi_schemes`), exposes versioned RESTful APIs with multi-criteria filtering, and establishes clean architectural boundaries for future Machine Learning (ranking) and LLM (explanation & guidance) integration.
+A production-ready FastAPI backend and deterministic rule-based eligibility engine for Indian Government and MSME schemes. This service connects to a local PostgreSQL database (`goi_schemes`), exposes versioned RESTful APIs with multi-criteria filtering, manages database migrations via Alembic, provides secure User and BusinessProfile management with Argon2 password hashing, and establishes clean architectural boundaries for future Machine Learning (ranking) and LLM (explanation & guidance) integration.
 
 ---
 
@@ -49,12 +49,16 @@ The codebase is structured under `app/`:
 
 ```
 backend/
+├── alembic/                            # Alembic database migration scripts
+│   ├── versions/                       # Versioned migration revisions
+│   └── env.py                          # Migration environment wired to DATABASE_URL
+├── alembic.ini                         # Alembic configuration
 ├── app/
 │   ├── main.py                         # FastAPI app setup, CORS, error handling
 │   │
 │   ├── core/
 │   │   ├── config.py                   # Environment settings & config loading
-│   │   ├── security.py                 # CORS middleware configuration
+│   │   ├── security.py                 # CORS middleware & Argon2 password hashing
 │   │   └── exceptions.py               # Custom exceptions and sanitized error handlers
 │   │
 │   ├── db/
@@ -63,23 +67,35 @@ backend/
 │   │
 │   ├── models/
 │   │   ├── scheme.py                   # Scheme model mapped to live 'schemes' table
-│   │   └── master.py                   # State, District, Sector, MSME macro models
+│   │   ├── master.py                   # State, District, Sector, MSME macro models
+│   │   ├── user.py                     # User account model
+│   │   ├── business_profile.py         # MSME Business Profile model
+│   │   └── research.py                 # ResearchRequest, ResearchReport, DataSource models
 │   │
 │   ├── schemas/
 │   │   ├── scheme.py                   # Pydantic v2 schemas for Scheme requests & responses
-│   │   └── eligibility.py              # UserProfile & EligibilityResult schemas
+│   │   ├── eligibility.py              # UserProfile & EligibilityResult schemas
+│   │   ├── user.py                     # Pydantic v2 schemas for User CRUD
+│   │   ├── business_profile.py         # Pydantic v2 schemas for BusinessProfile CRUD
+│   │   └── research.py                 # Pydantic v2 schemas for Research & DataSources
 │   │
 │   ├── repositories/
-│   │   └── scheme_repository.py        # Pure database queries & SQL filtering
+│   │   ├── scheme_repository.py        # Database queries & SQL filtering for schemes
+│   │   ├── user_repository.py          # Database operations for User
+│   │   └── business_profile_repository.py # Database operations for BusinessProfile
 │   │
 │   ├── services/
 │   │   ├── scheme_service.py           # Scheme business operations
-│   │   └── eligibility_service.py      # Deterministic rule evaluation engine
+│   │   ├── eligibility_service.py      # Deterministic rule evaluation engine
+│   │   ├── user_service.py             # User registration & verification logic
+│   │   └── business_profile_service.py # BusinessProfile management logic
 │   │
 │   ├── api/
 │   │   └── v1/
 │   │       ├── health.py               # Health check and DB status endpoints
-│   │       └── schemes.py              # Scheme listing, details, & eligibility endpoints
+│   │       ├── schemes.py              # Scheme listing, details, & eligibility endpoints
+│   │       ├── users.py                # User registration & profile management
+│   │       └── business_profiles.py    # Business profile lookup & updates
 │   │
 │   ├── ml/
 │   │   └── README.md                   # ML architecture documentation & future roadmap
@@ -89,7 +105,8 @@ backend/
 ├── tests/
 │   ├── conftest.py                     # TestClient and read-only DB session fixtures
 │   ├── test_health.py                  # Root, health, and DB connectivity tests
-│   └── test_schemes.py                 # Scheme listing, detail, filtering, & eligibility tests
+│   ├── test_schemes.py                 # Scheme listing, detail, filtering, & eligibility tests
+│   └── test_users_and_profiles.py      # User and BusinessProfile CRUD & security tests
 │
 ├── main.py                             # Root compatibility wrapper
 ├── database.py                         # Root compatibility wrapper
@@ -106,6 +123,8 @@ backend/
 
 - **Backend**: Python 3.11+, FastAPI, Uvicorn
 - **Database & ORM**: PostgreSQL, SQLAlchemy 2.x, psycopg3 (`psycopg[binary]`)
+- **Database Migrations**: Alembic
+- **Security & Cryptography**: Argon2id (`pwdlib[argon2]`)
 - **Data Validation & Schemas**: Pydantic v2
 - **Configuration**: python-dotenv, environment variables
 - **Testing**: pytest, FastAPI TestClient (httpx)
@@ -155,7 +174,15 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Run the Backend
+### 3. Run Database Migrations
+
+Apply Alembic migrations to create the application domain tables:
+
+```bash
+alembic upgrade head
+```
+
+### 4. Run the Backend
 
 Start the development server with auto-reload:
 
@@ -181,7 +208,7 @@ The server will start at: `http://127.0.0.1:8000`
 | `GET` | `/health` | Root health check and active scheme count |
 | `GET` | `/api/v1/health` | Versioned health check endpoint |
 
-### Schemes
+### Government Schemes
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -189,6 +216,20 @@ The server will start at: `http://127.0.0.1:8000`
 | `GET` | `/api/v1/schemes/{scheme_id}` | Retrieve detailed information for a scheme |
 | `POST` | `/api/v1/schemes/evaluate-eligibility` | Evaluate a user profile against all schemes |
 | `GET` | `/api/schemes` | Legacy backwards-compatible scheme listing |
+
+### Users & Business Profiles
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/v1/users` | Register a new user (Argon2 password hashing) |
+| `GET` | `/api/v1/users` | List registered users with pagination |
+| `GET` | `/api/v1/users/{user_id}` | Retrieve user profile by ID |
+| `PUT` | `/api/v1/users/{user_id}` | Update user profile details |
+| `POST` | `/api/v1/users/{user_id}/business-profiles` | Create a business profile for user |
+| `GET` | `/api/v1/users/{user_id}/business-profiles` | List business profiles for user |
+| `GET` | `/api/v1/business-profiles` | List all business profiles |
+| `GET` | `/api/v1/business-profiles/{profile_id}` | Get business profile details |
+| `PUT` | `/api/v1/business-profiles/{profile_id}` | Update business profile details |
 
 ### Query Filter Parameters (`GET /api/v1/schemes`)
 
@@ -204,22 +245,6 @@ The server will start at: `http://127.0.0.1:8000`
 - `skip` (integer, default: `0`): Pagination offset
 - `limit` (integer, default: `50`): Maximum records to return (up to 100)
 
-#### Example Requests
-
-```bash
-# Filter by sector
-curl -X GET "http://127.0.0.1:8000/api/v1/schemes?sector=Micro+Enterprise"
-
-# Filter by scheme type
-curl -X GET "http://127.0.0.1:8000/api/v1/schemes?scheme_type=loan"
-
-# Combine multiple filters
-curl -X GET "http://127.0.0.1:8000/api/v1/schemes?sector=Micro+Enterprise&scheme_type=loan"
-
-# Single scheme lookup
-curl -X GET "http://127.0.0.1:8000/api/v1/schemes/1"
-```
-
 ---
 
 ## 7. Running Tests
@@ -234,12 +259,22 @@ The test suite validates:
 1. Root endpoint (`GET /`)
 2. Health check (`GET /health`)
 3. Versioned health check (`GET /api/v1/health`)
-4. Direct database connectivity & scheme count validation
+4. Direct database connectivity & scheme count validation (verifying 12 schemes)
 5. Scheme listing (`GET /api/v1/schemes`)
 6. Scheme detail by ID (`GET /api/v1/schemes/1`)
-7. Proper 404 response for nonexistent scheme
+7. 404 response for nonexistent scheme
 8. State filtering (nationwide vs. strict state)
 9. Sector filtering (primary sector & business activity matching)
 10. Multi-filter combinations
 11. Backwards compatibility wrapper routes
 12. Deterministic rule-based eligibility evaluation engine
+13. User creation with Argon2 password hashing
+14. Duplicate email validation (400 Bad Request)
+15. User retrieval and listing
+16. User update
+17. Business profile creation for user
+18. Duplicate UDYAM number validation (400 Bad Request)
+19. Business profile listing for user
+20. Single business profile retrieval
+21. Business profile updates
+22. 404 handling for nonexistent user and profile

@@ -81,6 +81,23 @@ def register_exception_handlers(app: FastAPI) -> None:
             },
         )
 
+    @app.exception_handler(AppException)
+    async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+        error_name = (
+            "Bad Request"
+            if exc.status_code == status.HTTP_400_BAD_REQUEST
+            else "Not Found"
+            if exc.status_code == status.HTTP_404_NOT_FOUND
+            else "Error"
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": error_name,
+                "detail": exc.message,
+            },
+        )
+
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.exception("Unhandled server error occurred")

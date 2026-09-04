@@ -25,6 +25,14 @@ class Settings:
         "postgresql+psycopg://postgres:postgres@localhost:5432/goi_schemes",
     )
 
+    # JWT Authentication
+    JWT_SECRET_KEY: str = os.getenv(
+        "JWT_SECRET_KEY",
+        "development_jwt_secret_key_msme_recommendation_platform_2026_super_secure_key",
+    )
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+
     # CORS settings (comma-separated list of allowed origins)
     _cors_origins_env: str = os.getenv(
         "CORS_ORIGINS",

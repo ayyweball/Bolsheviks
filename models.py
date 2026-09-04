@@ -12,6 +12,9 @@ from app.models.master import (
     MsmeDistrictData,
     MsmeActivityData,
 )
+from app.models.user import User
+from app.models.business_profile import BusinessProfile
+from app.models.research import ResearchRequest, ResearchReport, DataSource
 
 __all__ = [
     "Scheme",
@@ -26,4 +29,9 @@ __all__ = [
     "MsmeStateData",
     "MsmeDistrictData",
     "MsmeActivityData",
+    "User",
+    "BusinessProfile",
+    "ResearchRequest",
+    "ResearchReport",
+    "DataSource",
 ]
