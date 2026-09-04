@@ -1,4 +1,3 @@
-# Root compatibility wrapper delegating to app.db
 from app.db.database import Base, engine
 from app.db.session import SessionLocal, get_db
 

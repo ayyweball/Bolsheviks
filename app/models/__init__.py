@@ -1,4 +1,3 @@
-# Root compatibility wrapper delegating to app.models
 from app.models.scheme import Scheme, Schemes
 from app.models.master import (
     SchemeEligibility,

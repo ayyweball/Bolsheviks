@@ -1,23 +1,4 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from database import SessionLocal
-from models import Schemes
+# Root compatibility wrapper delegating to app.api.v1.schemes
+from app.api.v1.schemes import router
 
-router = APIRouter(
-    prefix = "/api/schemes",
-    tags =["Schemes"]
-)
-
-def get_db():
-    db=SessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()
-
-@router.get("/")
-def get_schemes(db:Session = Depends(get_db)):
-   schemes = db.query(Schemes).all()
-
-   return schemes
+__all__ = ["router"]
