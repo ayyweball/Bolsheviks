@@ -35,6 +35,14 @@ from app.schemas.auth import (
     RegisterRequest,
 )
 
+from app.schemas.geography import DistrictCoordinates
+from app.schemas.weather import (
+    CurrentWeatherMetrics,
+    DailyForecastDay,
+    DistrictWeatherContext,
+)
+from app.schemas.research_context import DistrictResearchContextResponse
+
 __all__ = [
     "SchemeBase",
     "SchemeResponse",
@@ -60,4 +68,10 @@ __all__ = [
     "TokenResponse",
     "LoginRequest",
     "RegisterRequest",
+    "DistrictCoordinates",
+    "CurrentWeatherMetrics",
+    "DailyForecastDay",
+    "DistrictWeatherContext",
+    "DistrictResearchContextResponse",
 ]
+

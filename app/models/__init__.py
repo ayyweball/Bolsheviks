@@ -14,6 +14,7 @@ from app.models.master import (
 from app.models.user import User
 from app.models.business_profile import BusinessProfile
 from app.models.research import ResearchRequest, ResearchReport, DataSource
+from app.models.research_models import DistrictGeoCentroid, DistrictWeatherCache
 
 __all__ = [
     "Scheme",
@@ -33,4 +34,6 @@ __all__ = [
     "ResearchRequest",
     "ResearchReport",
     "DataSource",
+    "DistrictGeoCentroid",
+    "DistrictWeatherCache",
 ]

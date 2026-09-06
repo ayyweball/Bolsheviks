@@ -6,6 +6,7 @@ from app.api.v1.users import router as users_router
 from app.api.v1.business_profiles import router as business_profiles_router
 from app.api.v1.programs import router as programs_router
 from app.api.v1.recommendations import router as recommendations_router
+from app.api.v1.research import router as research_router
 
 api_v1_router = APIRouter()
 api_v1_router.include_router(auth_router)
@@ -15,5 +16,7 @@ api_v1_router.include_router(users_router)
 api_v1_router.include_router(business_profiles_router)
 api_v1_router.include_router(programs_router)
 api_v1_router.include_router(recommendations_router)
+api_v1_router.include_router(research_router)
 
 __all__ = ["api_v1_router"]
+
