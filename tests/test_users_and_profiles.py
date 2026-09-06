@@ -54,13 +54,12 @@ def test_create_user_duplicate_email(client: TestClient, unique_suffix: str):
     assert "already registered" in data.get("detail", "").lower()
 
 
-def test_get_user_by_id(client: TestClient, unique_suffix: str):
+def test_get_user_by_id(client: TestClient, db_session: Session, unique_suffix: str):
     """Test retrieving user details by ID."""
-    users_resp = client.get("/api/v1/users")
-    assert users_resp.status_code == status.HTTP_200_OK
-    users = users_resp.json()
-    target_user = next((u for u in users if unique_suffix in u["email"]), users[0])
-    target_id = target_user["id"]
+    email = f"entrepreneur_{unique_suffix}@msme.test"
+    target_user = db_session.query(User).filter(User.email == email).first()
+    assert target_user is not None
+    target_id = target_user.id
 
     response = client.get(f"/api/v1/users/{target_id}")
     assert response.status_code == status.HTTP_200_OK
@@ -73,12 +72,12 @@ def test_get_nonexistent_user(client: TestClient):
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
-def test_update_user(client: TestClient, unique_suffix: str):
+def test_update_user(client: TestClient, db_session: Session, unique_suffix: str):
     """Test updating user attributes."""
-    users_resp = client.get("/api/v1/users")
-    users = users_resp.json()
-    target_user = next((u for u in users if unique_suffix in u["email"]), users[0])
-    target_id = target_user["id"]
+    email = f"entrepreneur_{unique_suffix}@msme.test"
+    target_user = db_session.query(User).filter(User.email == email).first()
+    assert target_user is not None
+    target_id = target_user.id
 
     update_payload = {
         "full_name": "Ramesh K. Sharma (Updated)",
@@ -104,13 +103,13 @@ def _get_auth_headers(client: TestClient, email: str, password: str = "SecurePas
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_create_business_profile_for_user(client: TestClient, unique_suffix: str):
+def test_create_business_profile_for_user(client: TestClient, db_session: Session, unique_suffix: str):
     """Test creating a business profile associated with a user."""
-    users_resp = client.get("/api/v1/users")
-    users = users_resp.json()
-    target_user = next((u for u in users if unique_suffix in u["email"]), users[0])
-    user_id = target_user["id"]
-    headers = _get_auth_headers(client, target_user["email"])
+    email = f"entrepreneur_{unique_suffix}@msme.test"
+    target_user = db_session.query(User).filter(User.email == email).first()
+    assert target_user is not None
+    user_id = target_user.id
+    headers = _get_auth_headers(client, email)
 
     udyam_no = f"UDYAM-RJ-{unique_suffix[:4].upper()}-00123"
     profile_payload = {
@@ -140,13 +139,13 @@ def test_create_business_profile_for_user(client: TestClient, unique_suffix: str
     assert data["annual_turnover"] == 4500000.0
 
 
-def test_create_business_profile_duplicate_udyam(client: TestClient, unique_suffix: str):
+def test_create_business_profile_duplicate_udyam(client: TestClient, db_session: Session, unique_suffix: str):
     """Test that creating a profile with duplicate UDYAM registration fails."""
-    users_resp = client.get("/api/v1/users")
-    users = users_resp.json()
-    target_user = next((u for u in users if unique_suffix in u["email"]), users[0])
-    user_id = target_user["id"]
-    headers = _get_auth_headers(client, target_user["email"])
+    email = f"entrepreneur_{unique_suffix}@msme.test"
+    target_user = db_session.query(User).filter(User.email == email).first()
+    assert target_user is not None
+    user_id = target_user.id
+    headers = _get_auth_headers(client, email)
 
     udyam_no = f"UDYAM-RJ-{unique_suffix[:4].upper()}-00123"
     duplicate_payload = {
@@ -163,13 +162,13 @@ def test_create_business_profile_duplicate_udyam(client: TestClient, unique_suff
     assert "already exists" in response.json().get("detail", "").lower()
 
 
-def test_list_business_profiles_for_user(client: TestClient, unique_suffix: str):
+def test_list_business_profiles_for_user(client: TestClient, db_session: Session, unique_suffix: str):
     """Test listing all business profiles for a specific user."""
-    users_resp = client.get("/api/v1/users")
-    users = users_resp.json()
-    target_user = next((u for u in users if unique_suffix in u["email"]), users[0])
-    user_id = target_user["id"]
-    headers = _get_auth_headers(client, target_user["email"])
+    email = f"entrepreneur_{unique_suffix}@msme.test"
+    target_user = db_session.query(User).filter(User.email == email).first()
+    assert target_user is not None
+    user_id = target_user.id
+    headers = _get_auth_headers(client, email)
 
     response = client.get(f"/api/v1/users/{user_id}/business-profiles", headers=headers)
     assert response.status_code == status.HTTP_200_OK

@@ -56,3 +56,54 @@ class EligibilityAssessmentResponse(BaseModel):
     total_ineligible: int
     eligible_schemes: List[EligibilityResult]
     ineligible_schemes: List[EligibilityResult]
+
+
+class FinancialConstraints(BaseModel):
+    """Authoritative financial constraints and limits for a government programme."""
+    model_config = ConfigDict(from_attributes=True)
+
+    min_loan_amount: Optional[float] = None
+    max_loan_amount: Optional[float] = None
+    min_project_cost: Optional[float] = None
+    max_project_cost: Optional[float] = None
+    max_subsidy_amount: Optional[float] = None
+    subsidy_percentage: Optional[float] = None
+    max_guarantee_limit: Optional[float] = None
+    guarantee_coverage_pct: Optional[float] = None
+    interest_rate_min: Optional[float] = None
+    interest_rate_max: Optional[float] = None
+
+
+class ProgramEligibilityResult(BaseModel):
+    """Deterministic statutory evaluation result for an individual government programme."""
+    model_config = ConfigDict(from_attributes=True)
+
+    program_id: int
+    program_code: str
+    program_name: str
+    primary_type: str
+    actionability_type: str
+    is_eligible: bool
+    status: str = Field(..., description="'Eligible', 'Ineligible', or 'Partially Verified'")
+    reasons: List[str] = Field(default_factory=list, description="Rules satisfied by the user profile")
+    disqualifying_reasons: List[str] = Field(default_factory=list, description="Rules violated by the user profile")
+    unverified_criteria: List[str] = Field(default_factory=list, description="Statutory or operational criteria requiring external verification")
+    financial_constraints: Optional[FinancialConstraints] = None
+    official_portal_url: Optional[str] = None
+    benefit_summary: Optional[str] = None
+
+
+class ProgramEligibilityAssessmentResponse(BaseModel):
+    """Complete deterministic statutory eligibility evaluation across all government programmes."""
+    total_evaluated: int
+    total_eligible: int
+    total_ineligible: int
+    total_partially_verified: int
+    eligible_programs: List[ProgramEligibilityResult]
+    ineligible_programs: List[ProgramEligibilityResult]
+    partially_verified_programs: List[ProgramEligibilityResult]
+    directly_recommendable_count: int
+    component_recommendable_count: int
+    platform_count: int
+    framework_count: int
+

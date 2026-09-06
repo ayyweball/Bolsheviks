@@ -26,6 +26,17 @@ class SchemeNotFoundException(AppException):
         self.scheme_id = scheme_id
 
 
+class ProgramNotFoundException(AppException):
+    """Raised when a requested government programme is not found."""
+
+    def __init__(self, identifier: Any):
+        super().__init__(
+            message=f"Government programme '{identifier}' not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+        self.identifier = identifier
+
+
 class InvalidFilterException(AppException):
     """Raised when invalid filtering parameters are supplied."""
 
@@ -34,6 +45,7 @@ class InvalidFilterException(AppException):
             message=message,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
+        self.message = message
 
 
 class DatabaseConnectionException(AppException):
@@ -57,6 +69,17 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "error": "Not Found",
                 "detail": exc.message,
                 "scheme_id": exc.scheme_id,
+            },
+        )
+
+    @app.exception_handler(ProgramNotFoundException)
+    async def program_not_found_handler(request: Request, exc: ProgramNotFoundException) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": "Not Found",
+                "detail": exc.message,
+                "identifier": str(exc.identifier),
             },
         )
 
