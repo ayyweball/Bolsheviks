@@ -30,6 +30,7 @@ export async function POST(req: Request) {
       existingLoans,
       creditHistory,
       loanNeeded,
+      projectCost: rawProjectCost,
       purpose,
       preferredTenure,
       collateralAvailable,
@@ -37,36 +38,85 @@ export async function POST(req: Request) {
       programCode,
     } = body;
 
-    if (!monthlyIncome || !loanNeeded) {
-      return NextResponse.json({ error: 'Monthly income and loan amount are required' }, { status: 400 });
+    const [dbUser, dbBusiness] = await Promise.all([
+      prisma.user.findUnique({ where: { id: user.id } }),
+      prisma.business.findFirst({ where: { userId: user.id }, orderBy: { createdAt: 'desc' } }),
+    ]);
+
+    // Financial Inputs without Fabrication: Require explicit or saved values
+    const income = monthlyIncome != null && monthlyIncome !== ''
+      ? parseFloat(monthlyIncome.toString())
+      : (dbBusiness?.monthlyIncome ?? null);
+
+    const projectCost = rawProjectCost != null && rawProjectCost !== ''
+      ? parseFloat(rawProjectCost.toString())
+      : (loanNeeded != null && loanNeeded !== ''
+          ? parseFloat(loanNeeded.toString())
+          : (dbBusiness?.projectCost ?? dbBusiness?.estimatedCapital ?? null));
+
+    const requestedLoan = loanNeeded != null && loanNeeded !== ''
+      ? parseFloat(loanNeeded.toString())
+      : (body.requestedFinancing != null && body.requestedFinancing !== ''
+          ? parseFloat(body.requestedFinancing.toString())
+          : (dbBusiness?.requestedFinancing ?? projectCost ?? null));
+
+    if (income == null || isNaN(income) || income <= 0) {
+      return NextResponse.json(
+        { error: 'Verified monthly disposable income (monthlyIncome > 0) is required for debt serviceability evaluation. Please provide it in your profile or form.' },
+        { status: 400 }
+      );
     }
 
-    const amount = parseFloat(loanNeeded.toString());
-    const income = parseFloat(monthlyIncome.toString());
-    const expenses = parseFloat((monthlyExpenses || 0).toString());
+    if (projectCost == null || isNaN(projectCost) || projectCost <= 0) {
+      return NextResponse.json(
+        { error: 'Total project cost (projectCost > 0) is required for deterministic capital structuring. Please provide it in your profile or form.' },
+        { status: 400 }
+      );
+    }
+
+    if (!programId && !programCode) {
+      return NextResponse.json(
+        { error: 'A valid government programme (programId or programCode) is required for deterministic financial structuring.' },
+        { status: 400 }
+      );
+    }
+
+    const expenses = monthlyExpenses != null && monthlyExpenses !== ''
+      ? parseFloat(monthlyExpenses.toString())
+      : (dbBusiness?.monthlyExpenses ?? 0.0);
+
     const existingLoansList = Array.isArray(existingLoans) ? existingLoans : [];
     const totalExistingEmi = existingLoansList.reduce(
       (acc: number, curr: any) => acc + (parseFloat(curr?.emi?.toString() || '0') || 0),
       0
     );
+    const finalExistingEmi = totalExistingEmi > 0 ? totalExistingEmi : (dbBusiness?.existingMonthlyEmi ?? 0.0);
+
+    // Demographics and Operational Parameters from Saved Profile (Zero Fabrication)
+    const applicantSocialCategory = body.applicant_social_category || body.socialCategory || dbUser?.socialCategory || undefined;
+    const applicantGender = body.applicant_gender || body.gender || dbUser?.gender || undefined;
+    const isRural = body.is_rural !== undefined ? body.is_rural : (dbUser?.isRural ?? undefined);
+    const isNewBusiness = body.is_new_business !== undefined ? body.is_new_business : (dbBusiness?.isNewBusiness ?? undefined);
+
+    // 1. Authoritative Call to FastAPI Backend Core
+    const structReq: FinancialStructuringRequest = {
+      program_id: programId ? parseInt(programId.toString()) : undefined,
+      program_code: programCode ? programCode.toString() : undefined,
+      project_cost: projectCost,
+      requested_loan_amount: requestedLoan || undefined,
+      monthly_income: income,
+      monthly_expenses: expenses,
+      existing_monthly_emi: finalExistingEmi,
+      preferred_tenure_months: preferredTenure ? parseInt(preferredTenure.toString()) : undefined,
+      applicant_social_category: applicantSocialCategory,
+      applicant_gender: applicantGender,
+      is_rural: isRural,
+      is_new_business: isNewBusiness,
+    };
 
     let financialResult: any;
 
     try {
-      // 1. Authoritative Call to FastAPI Backend Core
-      const structReq: FinancialStructuringRequest = {
-        program_id: programId ? parseInt(programId.toString()) : undefined,
-        program_code: programCode || undefined,
-        project_cost: amount * 1.15, // Standard baseline with margin
-        requested_loan_amount: amount,
-        monthly_income: income,
-        monthly_expenses: expenses,
-        existing_monthly_emi: totalExistingEmi,
-        preferred_tenure_months: preferredTenure ? parseInt(preferredTenure.toString()) : 60,
-        applicant_social_category: 'General',
-        is_new_business: true,
-      };
-
       const structResp = await backendApiClient.getFinancialStructuring(structReq);
 
       const conservativeScenario = structResp.loan_scenarios.find(s => s.scenario_type === 'CONSERVATIVE')
@@ -78,110 +128,72 @@ export async function POST(req: Request) {
         || structResp.loan_scenarios[2]
         || structResp.loan_scenarios[structResp.loan_scenarios.length - 1];
 
+      const mapScenario = (s: typeof conservativeScenario) => {
+        if (!s) return null;
+        return {
+          scenarioType: s.scenario_type,
+          tenureMonths: s.tenure_months,
+          moratoriumMonths: s.moratorium_months,
+          interestRate: s.annual_interest_rate_pct ?? null,
+          isMarketLinked: s.is_market_linked,
+          isBenchmarkAssumption: s.is_benchmark_assumption,
+          rateNote: s.rate_note || null,
+          monthlyEMI: s.monthly_emi != null ? Math.round(s.monthly_emi) : null,
+          totalInterest: s.total_interest_payable != null ? Math.round(s.total_interest_payable) : null,
+          totalRepayment: s.total_repayment_amount != null ? Math.round(s.total_repayment_amount) : null,
+          projectedDTI: s.projected_dti_pct != null ? Number(s.projected_dti_pct.toFixed(1)) : null,
+          isAffordable: s.is_affordable,
+          isRecommended: s.is_recommended,
+          affordabilityNotes: s.affordability_notes || [],
+        };
+      };
+
       financialResult = {
+        programId: structResp.program_id,
+        programCode: structResp.program_code,
+        programName: structResp.program_name,
+        primaryType: structResp.primary_type,
+        actionabilityType: structResp.actionability_type,
+        isFinancingApplicable: structResp.is_financing_applicable,
+        assistanceSummary: structResp.assistance_summary,
         debtToIncomeRatio: Number(structResp.debt_health.existing_dti_pct.toFixed(1)),
         affordableEMI: Math.round(structResp.debt_health.affordable_emi_cap),
+        uncommittedSurplus: Math.round(structResp.debt_health.uncommitted_surplus),
         creditAssessment: `${structResp.debt_health.dti_health_category.replace(/_/g, ' ')} Risk`,
+        dtiHealthCategory: structResp.debt_health.dti_health_category,
         structures: {
-          conservative: {
-            tenureMonths: conservativeScenario ? conservativeScenario.tenure_months : 48,
-            interestRate: conservativeScenario?.annual_interest_rate_pct ?? 9.0,
-            monthlyEMI: Math.round(conservativeScenario?.monthly_emi ?? 0),
-            totalInterest: Math.round(conservativeScenario?.total_interest_payable ?? 0),
-            feasibility: conservativeScenario?.is_affordable ? 'Highly Affordable' : 'Requires Surplus Adjustment',
-          },
-          balanced: {
-            tenureMonths: balancedScenario ? balancedScenario.tenure_months : 60,
-            interestRate: balancedScenario?.annual_interest_rate_pct ?? 9.0,
-            monthlyEMI: Math.round(balancedScenario?.monthly_emi ?? 0),
-            totalInterest: Math.round(balancedScenario?.total_interest_payable ?? 0),
-            feasibility: balancedScenario?.is_affordable ? 'Recommended (Balanced Cashflow)' : 'Elevated DTI',
-          },
-          extended: {
-            tenureMonths: extendedScenario ? extendedScenario.tenure_months : 72,
-            interestRate: extendedScenario?.annual_interest_rate_pct ?? 9.0,
-            monthlyEMI: Math.round(extendedScenario?.monthly_emi ?? 0),
-            totalInterest: Math.round(extendedScenario?.total_interest_payable ?? 0),
-            feasibility: extendedScenario?.is_affordable ? 'Lowest Monthly Outflow' : 'Extended Liability',
-          },
+          conservative: mapScenario(conservativeScenario),
+          balanced: mapScenario(balancedScenario),
+          extended: mapScenario(extendedScenario),
         },
-        preApprovalChecklist: structResp.statutory_checklist && structResp.statutory_checklist.length > 0
-          ? structResp.statutory_checklist
-          : [
-              'Detailed Project Report (DPR)',
-              'Udyam Registration Certificate',
-              'Aadhaar Card & PAN Card Copy',
-              'Last 6 Months Bank Statement',
-              'Proof of Business Premises (Lease/Electricity Bill)',
-            ],
+        rawScenarios: structResp.loan_scenarios,
+        preApprovalChecklist: structResp.statutory_checklist || [],
         capitalBreakdown: structResp.capital_structure,
         statutoryConstraints: structResp.financial_constraints,
         warnings: structResp.warnings,
         disclaimer: structResp.disclaimer,
-        programName: structResp.program_name,
         source: 'FastAPI Backend Core (Deterministic Financial Structuring)',
       };
-    } catch (backendError) {
-      console.warn('FastAPI financial structuring unreachable, using fallback math:', backendError);
-
-      const netSurplus = income - expenses - totalExistingEmi;
-      const dti = Math.min(100, Math.round((totalExistingEmi / (income || 1)) * 100));
-      const calcEmi = (p: number, rYear: number, nMonths: number) => {
-        const r = rYear / (12 * 100);
-        return Math.round((p * r * Math.pow(1 + r, nMonths)) / (Math.pow(1 + r, nMonths) - 1));
-      };
-
-      const emi48 = calcEmi(amount, 9.5, 48);
-      const emi60 = calcEmi(amount, 9.0, 60);
-      const emi72 = calcEmi(amount, 9.5, 72);
-
-      financialResult = {
-        debtToIncomeRatio: dti,
-        affordableEMI: Math.max(2000, Math.round(netSurplus * 0.5)),
-        creditAssessment: dti < 35 ? 'Low Risk' : dti < 55 ? 'Moderate Risk' : 'High Risk',
-        structures: {
-          conservative: {
-            tenureMonths: 48,
-            interestRate: 9.5,
-            monthlyEMI: emi48,
-            totalInterest: emi48 * 48 - amount,
-            feasibility: 'Highly Affordable',
-          },
-          balanced: {
-            tenureMonths: 60,
-            interestRate: 9.0,
-            monthlyEMI: emi60,
-            totalInterest: emi60 * 60 - amount,
-            feasibility: 'Recommended (Balanced Structure)',
-          },
-          extended: {
-            tenureMonths: 72,
-            interestRate: 9.5,
-            monthlyEMI: emi72,
-            totalInterest: emi72 * 72 - amount,
-            feasibility: 'Lowest Monthly Outflow',
-          },
+    } catch (backendError: any) {
+      console.error('FastAPI financial structuring engine error:', backendError);
+      return NextResponse.json(
+        {
+          error: backendError.message || 'The authoritative financial structuring engine is temporarily unavailable.',
         },
-        preApprovalChecklist: [
-          'Aadhaar Card & PAN Card copy',
-          'Bank Account Statement for last 6 months',
-          'Proof of Business Location (Gram Panchayat letter / lease / electricity bill)',
-          'Udyam Registration Certificate',
-          'Project Cost Estimate / Quotation for equipment',
-        ],
-        source: 'Local Fallback Math',
-      };
+        { status: 502 }
+      );
     }
 
     // Link or create business record in Prisma
-    let busId = businessId;
+    let busId = businessId || dbBusiness?.id;
     if (!busId) {
       const bus = await prisma.business.create({
         data: {
           userId: user.id,
-          type: purpose || 'services',
-          estimatedCapital: amount,
-          targetMonthlyIncome: income,
+          type: purpose || 'General',
+          estimatedCapital: projectCost,
+          projectCost: projectCost,
+          monthlyIncome: income,
         },
       });
       busId = bus.id;

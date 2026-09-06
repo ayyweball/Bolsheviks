@@ -49,11 +49,11 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
   const capital = fin.capitalBreakdown;
   const warnings = fin.warnings || [];
 
-  const promoterMarginPct = capital?.promoter_contribution_pct ?? 10;
-  const promoterMarginAmt = capital?.promoter_contribution_amount ?? ((advisory?.business?.estimatedCapital || 300000) * 0.1);
-  const effectiveDebtAmt = capital?.net_effective_debt ?? capital?.initial_bank_loan ?? ((advisory?.business?.estimatedCapital || 300000) * 0.9);
-  const hasSubsidy = capital?.subsidy_amount && capital.subsidy_amount > 0;
-  const hasGuarantee = capital?.credit_guarantee_eligible;
+  const promoterMarginPct = capital?.promoter_contribution_pct ?? null;
+  const promoterMarginAmt = capital?.promoter_contribution_amount ?? null;
+  const effectiveDebtAmt = capital?.net_effective_debt ?? capital?.initial_bank_loan ?? null;
+  const hasSubsidy = capital?.subsidy_amount != null && capital.subsidy_amount > 0;
+  const hasGuarantee = !!capital?.credit_guarantee_eligible;
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
@@ -74,7 +74,7 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
                 </p>
               </div>
               <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-800 font-bold text-xs">
-                Risk Assessment: {fin.creditAssessment || 'Low Risk'}
+                Risk Assessment: {fin.creditAssessment || 'Evaluated on sanction'}
               </span>
             </div>
 
@@ -84,13 +84,19 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
               <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
                 <div>
                   <div className="text-xs font-bold text-slate-500">{t('advisory.debtToIncome')}</div>
-                  <div className="text-2xl font-black text-slate-900 mt-0.5">{fin.debtToIncomeRatio ?? 15}%</div>
+                  <div className="text-2xl font-black text-slate-900 mt-0.5">
+                    {fin.debtToIncomeRatio != null ? `${fin.debtToIncomeRatio}%` : 'Not available'}
+                  </div>
                   <div className="text-[11px] text-slate-400 mt-1">Healthy statutory threshold: Below 40-50%</div>
                 </div>
                 <div className={`w-14 h-14 rounded-full border-4 flex items-center justify-center font-bold text-xs bg-white ${
-                  (fin.debtToIncomeRatio || 15) <= 40 ? 'border-emerald-500 text-emerald-700' : 'border-amber-500 text-amber-700'
+                  fin.debtToIncomeRatio != null && fin.debtToIncomeRatio <= 40
+                    ? 'border-emerald-500 text-emerald-700'
+                    : fin.debtToIncomeRatio != null
+                    ? 'border-amber-500 text-amber-700'
+                    : 'border-slate-300 text-slate-400'
                 }`}>
-                  {(fin.debtToIncomeRatio || 15) <= 40 ? 'Good' : 'Stretched'}
+                  {fin.debtToIncomeRatio != null ? (fin.debtToIncomeRatio <= 40 ? 'Good' : 'Stretched') : 'N/A'}
                 </div>
               </div>
 
@@ -98,7 +104,9 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
               <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-center justify-between">
                 <div>
                   <div className="text-xs font-bold text-emerald-800">{t('advisory.affordableEMI')}</div>
-                  <div className="text-2xl font-black text-emerald-900 mt-0.5">₹{fin.affordableEMI?.toLocaleString('en-IN') || '12,500'} / mo</div>
+                  <div className="text-2xl font-black text-emerald-900 mt-0.5">
+                    {fin.affordableEMI != null ? `₹${fin.affordableEMI.toLocaleString('en-IN')} / mo` : 'Not available'}
+                  </div>
                   <div className="text-[11px] text-emerald-700 mt-1">Dual-gate verified safe repayment capacity</div>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center">
@@ -118,14 +126,18 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
                   <h3 className="text-xs font-extrabold text-slate-900">Authoritative Capital Stack & Margin Breakdown</h3>
                 </div>
                 <span className="text-xs font-bold text-blue-700 bg-white px-2.5 py-1 rounded-lg shadow-xs">
-                  {promoterMarginPct}% Margin : {100 - promoterMarginPct}% Debt/Grant
+                  {promoterMarginPct != null ? `${promoterMarginPct}% Margin : ${100 - promoterMarginPct}% Debt/Grant` : 'Statutory Capital Stack'}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
                 <div className="p-3 bg-white rounded-xl border border-blue-100">
-                  <div className="text-[11px] font-bold text-slate-500">{promoterMarginPct}% Beneficiary Margin Money</div>
-                  <div className="text-lg font-black text-slate-900 mt-0.5">₹{Math.round(promoterMarginAmt).toLocaleString('en-IN')}</div>
+                  <div className="text-[11px] font-bold text-slate-500">
+                    {promoterMarginPct != null ? `${promoterMarginPct}% Beneficiary Margin Money` : 'Beneficiary Margin Money'}
+                  </div>
+                  <div className="text-lg font-black text-slate-900 mt-0.5">
+                    {promoterMarginAmt != null ? `₹${Math.round(promoterMarginAmt).toLocaleString('en-IN')}` : 'As per scheme rules'}
+                  </div>
                   <div className="text-[10px] text-slate-400">
                     {capital?.is_statutory_margin ? 'Authoritative statutory equity rule' : 'Required self-contribution fraction'}
                   </div>
@@ -133,11 +145,13 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
 
                 <div className="p-3 bg-white rounded-xl border border-blue-100">
                   <div className="text-[11px] font-bold text-blue-700">Net Bank Debt Financing</div>
-                  <div className="text-lg font-black text-blue-900 mt-0.5">₹{Math.round(effectiveDebtAmt).toLocaleString('en-IN')}</div>
+                  <div className="text-lg font-black text-blue-900 mt-0.5">
+                    {effectiveDebtAmt != null ? `₹${Math.round(effectiveDebtAmt).toLocaleString('en-IN')}` : 'Evaluated on sanction'}
+                  </div>
                   <div className="text-[10px] text-blue-600">Funded via scheduled commercial bank loan</div>
                 </div>
 
-                {hasSubsidy ? (
+                {hasSubsidy && capital?.subsidy_amount != null ? (
                   <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
                     <div className="text-[11px] font-bold text-emerald-800">Capital Subsidy / Grant</div>
                     <div className="text-lg font-black text-emerald-900 mt-0.5">₹{Math.round(capital.subsidy_amount).toLocaleString('en-IN')}</div>
@@ -149,10 +163,10 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
                   <div className="p-3 bg-purple-50 rounded-xl border border-purple-200">
                     <div className="text-[11px] font-bold text-purple-800">Credit Guarantee Cover</div>
                     <div className="text-lg font-black text-purple-900 mt-0.5">
-                      ₹{Math.round(capital.guaranteed_amount || effectiveDebtAmt * 0.75).toLocaleString('en-IN')}
+                      {capital.guaranteed_amount != null ? `₹${Math.round(capital.guaranteed_amount).toLocaleString('en-IN')}` : 'Collateral-free risk coverage'}
                     </div>
                     <div className="text-[10px] text-purple-700">
-                      {capital.guarantee_coverage_pct ? `${capital.guarantee_coverage_pct}% lender risk mitigation` : 'Collateral-free risk coverage'}
+                      {capital.guarantee_coverage_pct ? `${capital.guarantee_coverage_pct}% lender risk mitigation` : 'Lender risk coverage'}
                     </div>
                   </div>
                 ) : null}
@@ -163,18 +177,39 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
           {/* 3 Loan Structure Cards (Conservative, Balanced, Extended) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
-            {/* Conservative (48mo) */}
+            {/* Conservative */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between">
               <div>
                 <div className="text-xs font-bold uppercase text-slate-400">{t('advisory.conservative')}</div>
                 <div className="text-2xl font-black text-slate-900 mt-2">
-                  ₹{structures.conservative?.monthlyEMI?.toLocaleString('en-IN')} <span className="text-xs font-normal text-slate-400">/mo</span>
+                  {structures.conservative?.monthlyEMI != null ? (
+                    <>₹{structures.conservative.monthlyEMI.toLocaleString('en-IN')} <span className="text-xs font-normal text-slate-400">/mo</span></>
+                  ) : (
+                    <span className="text-sm font-semibold text-slate-500">Subject to terms</span>
+                  )}
                 </div>
                 
                 <div className="space-y-2 text-xs text-slate-600 mt-4 border-t pt-4">
-                  <div className="flex justify-between"><span>Tenure:</span> <strong className="text-slate-900">{structures.conservative?.tenureMonths || 48} Months</strong></div>
-                  <div className="flex justify-between"><span>Interest Rate:</span> <strong className="text-slate-900">{structures.conservative?.interestRate}% p.a.</strong></div>
-                  <div className="flex justify-between"><span>Total Interest:</span> <strong className="text-slate-900">₹{structures.conservative?.totalInterest?.toLocaleString('en-IN')}</strong></div>
+                  <div className="flex justify-between">
+                    <span>Tenure:</span>
+                    <strong className="text-slate-900">
+                      {structures.conservative?.tenureMonths != null ? `${structures.conservative.tenureMonths} Months` : 'Not specified'}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Interest Rate:</span>
+                    <strong className="text-slate-900">
+                      {structures.conservative?.interestRate != null
+                        ? `${structures.conservative.interestRate}% p.a.`
+                        : (structures.conservative?.isMarketLinked ? 'Market-Linked' : (structures.conservative?.rateNote || 'Lender benchmark'))}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total Interest:</span>
+                    <strong className="text-slate-900">
+                      {structures.conservative?.totalInterest != null ? `₹${structures.conservative.totalInterest.toLocaleString('en-IN')}` : 'Calculated on sanction'}
+                    </strong>
+                  </div>
                 </div>
               </div>
               <div className="mt-6 pt-3 border-t text-[11px] font-semibold text-slate-500 bg-slate-50 p-2.5 rounded-xl text-center">
@@ -182,7 +217,7 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
               </div>
             </div>
 
-            {/* Balanced (60mo) - Recommended */}
+            {/* Balanced - Recommended */}
             <div className="bg-gradient-to-b from-emerald-50 to-white p-6 rounded-3xl border-2 border-emerald-500 shadow-md flex flex-col justify-between relative">
               <div className="absolute -top-3 right-4 px-3 py-0.5 rounded-full bg-emerald-600 text-white font-extrabold text-[10px] uppercase tracking-wider">
                 Recommended
@@ -191,13 +226,34 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
               <div>
                 <div className="text-xs font-bold uppercase text-emerald-800">{t('advisory.balanced')}</div>
                 <div className="text-2xl font-black text-emerald-950 mt-2">
-                  ₹{structures.balanced?.monthlyEMI?.toLocaleString('en-IN')} <span className="text-xs font-normal text-slate-400">/mo</span>
+                  {structures.balanced?.monthlyEMI != null ? (
+                    <>₹{structures.balanced.monthlyEMI.toLocaleString('en-IN')} <span className="text-xs font-normal text-slate-400">/mo</span></>
+                  ) : (
+                    <span className="text-sm font-semibold text-slate-500">Subject to terms</span>
+                  )}
                 </div>
                 
                 <div className="space-y-2 text-xs text-slate-700 mt-4 border-t border-emerald-200 pt-4">
-                  <div className="flex justify-between"><span>Tenure:</span> <strong className="text-emerald-950">{structures.balanced?.tenureMonths || 60} Months</strong></div>
-                  <div className="flex justify-between"><span>Interest Rate:</span> <strong className="text-emerald-950">{structures.balanced?.interestRate}% p.a.</strong></div>
-                  <div className="flex justify-between"><span>Total Interest:</span> <strong className="text-emerald-950">₹{structures.balanced?.totalInterest?.toLocaleString('en-IN')}</strong></div>
+                  <div className="flex justify-between">
+                    <span>Tenure:</span>
+                    <strong className="text-emerald-950">
+                      {structures.balanced?.tenureMonths != null ? `${structures.balanced.tenureMonths} Months` : 'Not specified'}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Interest Rate:</span>
+                    <strong className="text-emerald-950">
+                      {structures.balanced?.interestRate != null
+                        ? `${structures.balanced.interestRate}% p.a.`
+                        : (structures.balanced?.isMarketLinked ? 'Market-Linked' : (structures.balanced?.rateNote || 'Lender benchmark'))}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total Interest:</span>
+                    <strong className="text-emerald-950">
+                      {structures.balanced?.totalInterest != null ? `₹${structures.balanced.totalInterest.toLocaleString('en-IN')}` : 'Calculated on sanction'}
+                    </strong>
+                  </div>
                 </div>
               </div>
               <div className="mt-6 pt-3 border-t border-emerald-200 text-[11px] font-bold text-emerald-800 bg-emerald-100/60 p-2.5 rounded-xl text-center">
@@ -205,18 +261,39 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
               </div>
             </div>
 
-            {/* Extended (72mo) */}
+            {/* Extended */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between">
               <div>
                 <div className="text-xs font-bold uppercase text-slate-400">{t('advisory.extended')}</div>
                 <div className="text-2xl font-black text-slate-900 mt-2">
-                  ₹{structures.extended?.monthlyEMI?.toLocaleString('en-IN')} <span className="text-xs font-normal text-slate-400">/mo</span>
+                  {structures.extended?.monthlyEMI != null ? (
+                    <>₹{structures.extended.monthlyEMI.toLocaleString('en-IN')} <span className="text-xs font-normal text-slate-400">/mo</span></>
+                  ) : (
+                    <span className="text-sm font-semibold text-slate-500">Subject to terms</span>
+                  )}
                 </div>
                 
                 <div className="space-y-2 text-xs text-slate-600 mt-4 border-t pt-4">
-                  <div className="flex justify-between"><span>Tenure:</span> <strong className="text-slate-900">{structures.extended?.tenureMonths || 72} Months</strong></div>
-                  <div className="flex justify-between"><span>Interest Rate:</span> <strong className="text-slate-900">{structures.extended?.interestRate}% p.a.</strong></div>
-                  <div className="flex justify-between"><span>Total Interest:</span> <strong className="text-slate-900">₹{structures.extended?.totalInterest?.toLocaleString('en-IN')}</strong></div>
+                  <div className="flex justify-between">
+                    <span>Tenure:</span>
+                    <strong className="text-slate-900">
+                      {structures.extended?.tenureMonths != null ? `${structures.extended.tenureMonths} Months` : 'Not specified'}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Interest Rate:</span>
+                    <strong className="text-slate-900">
+                      {structures.extended?.interestRate != null
+                        ? `${structures.extended.interestRate}% p.a.`
+                        : (structures.extended?.isMarketLinked ? 'Market-Linked' : (structures.extended?.rateNote || 'Lender benchmark'))}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total Interest:</span>
+                    <strong className="text-slate-900">
+                      {structures.extended?.totalInterest != null ? `₹${structures.extended.totalInterest.toLocaleString('en-IN')}` : 'Calculated on sanction'}
+                    </strong>
+                  </div>
                 </div>
               </div>
               <div className="mt-6 pt-3 border-t text-[11px] font-semibold text-slate-500 bg-slate-50 p-2.5 rounded-xl text-center">

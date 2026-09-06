@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { backendApiClient } from '@/lib/api-client';
-import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,10 +40,10 @@ export async function GET(req: Request) {
         officialPortalUrl: p.official_portal_url,
         sectors: p.sectors,
         status: p.status,
-        loanMin: 50000,
-        loanMax: p.benefit_headline_numeric || 1000000,
-        interestRate: 8.5,
-        tenure: 60,
+        loanMin: null,
+        loanMax: p.benefit_headline_numeric || null,
+        interestRate: null,
+        tenure: null,
         state: 'All India',
       }));
 
@@ -54,22 +53,14 @@ export async function GET(req: Request) {
         count: programs.length,
         source: 'FastAPI (PostgreSQL goi_schemes)',
       });
-    } catch (backendError) {
-      console.warn('FastAPI getPrograms unreachable, falling back to local prisma:', backendError);
+    } catch (backendError: any) {
+      console.error('FastAPI getPrograms failed:', backendError);
+      return NextResponse.json(
+        { error: backendError.message || 'Authoritative government programmes directory is currently unavailable.' },
+        { status: 502 }
+      );
     }
-
-    // Fallback if backend is unreachable
-    const schemes = await prisma.scheme.findMany({
-      orderBy: { loanMax: 'desc' },
-    });
-
-    return NextResponse.json({
-      programs: schemes,
-      schemes,
-      count: schemes.length,
-      source: 'Prisma SQLite Fallback',
-    });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

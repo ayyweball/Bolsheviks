@@ -52,18 +52,9 @@ const fundingData = [
   { name: 'Self Investment', value: 10, color: '#f59e0b' },
 ];
 
-const DEFAULT_DISTRICT_MAP: Record<string, string> = {
-  'Uttar Pradesh': 'Lucknow',
-  'Rajasthan': 'Jaipur',
-  'Bihar': 'Patna',
-  'Madhya Pradesh': 'Bhopal',
-  'Maharashtra': 'Pune',
-};
-
 export default function DashboardPage() {
   const { t } = useLanguage();
   const { user, setUser } = useAppStore();
-  const [selectedState, setSelectedState] = useState('Uttar Pradesh');
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [districtResearch, setDistrictResearch] = useState<any>(null);
@@ -76,7 +67,6 @@ export default function DashboardPage() {
       .then((data) => {
         if (data.user) {
           setUser(data.user);
-          setSelectedState(data.user.state || 'Uttar Pradesh');
         }
       })
       .catch(() => {});
@@ -97,23 +87,32 @@ export default function DashboardPage() {
       .catch(() => {});
   }, [setUser]);
 
-  // Fetch unified district research context when state changes
+  // Fetch unified district research context strictly from profile location (Zero Fabrication)
   useEffect(() => {
-    const targetDistrict = user?.district || DEFAULT_DISTRICT_MAP[selectedState] || 'Lucknow';
-    fetch(`/api/research/district-market-context?state_name=${encodeURIComponent(selectedState)}&district_name=${encodeURIComponent(targetDistrict)}`)
+    if (!user?.district || !user?.state) {
+      setDistrictResearch(null);
+      return;
+    }
+
+    fetch(`/api/research/district-market-context?state_name=${encodeURIComponent(user.state)}&district_name=${encodeURIComponent(user.district)}`)
       .then((res) => res.json())
       .then((data) => {
         if (data && !data.error) {
           setDistrictResearch(data);
+        } else {
+          setDistrictResearch(null);
         }
       })
-      .catch((err) => console.warn('Could not fetch district research context:', err));
-  }, [selectedState, user?.district]);
+      .catch((err) => {
+        console.warn('Could not fetch district research context:', err);
+        setDistrictResearch(null);
+      });
+  }, [user?.state, user?.district]);
 
   const market = districtResearch?.msme_market_context;
   const weather = districtResearch?.weather_context;
   const observations = districtResearch?.research_observations || [];
-  const activeDistrictName = districtResearch?.district_name || DEFAULT_DISTRICT_MAP[selectedState] || 'District';
+  const activeDistrictName = districtResearch?.district_name || user?.district;
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
@@ -138,17 +137,16 @@ export default function DashboardPage() {
             <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-800 text-xs font-semibold border border-emerald-200">
                 <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                <select
-                  value={selectedState}
-                  onChange={(e) => setSelectedState(e.target.value)}
-                  className="bg-transparent font-bold focus:outline-none cursor-pointer"
-                >
-                  <option value="Uttar Pradesh">Uttar Pradesh</option>
-                  <option value="Rajasthan">Rajasthan</option>
-                  <option value="Bihar">Bihar</option>
-                  <option value="Madhya Pradesh">Madhya Pradesh</option>
-                  <option value="Maharashtra">Maharashtra</option>
-                </select>
+                {user?.district && user?.state ? (
+                  <span>{user.district}, {user.state}</span>
+                ) : (
+                  <span className="text-amber-800 flex items-center gap-1">
+                    Location Not Configured
+                    <Link href="/dashboard/profile" className="underline font-bold text-emerald-700 ml-1">
+                      Set District
+                    </Link>
+                  </span>
+                )}
               </div>
 
               <Link
@@ -161,6 +159,25 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {/* Missing Location Alert Banner */}
+          {(!user?.district || !user?.state) && (
+            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-2.5">
+                <MapPin className="w-5 h-5 text-amber-600 shrink-0" />
+                <div>
+                  <p className="font-bold text-amber-950">District location not configured</p>
+                  <p className="text-amber-800">Complete your location in your profile to view district-specific market context, enterprise density, and microclimate signals.</p>
+                </div>
+              </div>
+              <Link
+                href="/dashboard/profile"
+                className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 shadow-sm transition-all"
+              >
+                Complete Profile
+              </Link>
+            </div>
+          )}
+
           {/* Greeting Banner */}
           <div className="flex items-center justify-between">
             <div>
@@ -169,7 +186,9 @@ export default function DashboardPage() {
                 <Sun className="w-6 h-6 text-amber-500 fill-amber-400" />
               </h1>
               <p className="text-xs text-slate-500 mt-0.5">
-                Market intelligence & statutory assistance overview for {activeDistrictName}, {selectedState}.
+                {user?.district && user?.state
+                  ? `Market intelligence & statutory assistance overview for ${activeDistrictName}, ${user.state}.`
+                  : 'Complete your business profile to view location-specific MSME market intelligence and weather signals.'}
               </p>
             </div>
           </div>
@@ -184,17 +203,21 @@ export default function DashboardPage() {
                   <TrendingUp className="w-5 h-5" />
                 </div>
                 <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
-                  {market?.state_rank_by_enterprises ? `Rank #${market.state_rank_by_enterprises}` : 'High'}
+                  {(market?.state_rank || market?.state_rank_by_enterprises) 
+                    ? `Rank #${market.state_rank || market.state_rank_by_enterprises}` 
+                    : (user?.district ? 'Pending' : 'No District')}
                 </span>
               </div>
               <div className="text-xs font-medium text-slate-500">{t('dashboard.marketDemand')}</div>
               <div className="text-xl font-black text-slate-900 mt-1">
-                {market?.total_enterprises ? `${(market.total_enterprises / 1000).toFixed(1)}k MSMEs` : 'Strong'}
+                {(market?.total_msmes || market?.total_enterprises) 
+                  ? `${((market.total_msmes || market.total_enterprises) / 1000).toFixed(1)}k MSMEs` 
+                  : (user?.district ? 'Loading...' : 'Set Location')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 {market?.district_share_of_state_pct 
                   ? `${market.district_share_of_state_pct.toFixed(1)}% of state enterprise base` 
-                  : 'Official Udyam records'}
+                  : (market?.micro_share ? `${(market.micro_share * 100).toFixed(1)}% Micro Enterprises` : (user?.district ? 'Official Udyam records' : 'District profile required'))}
               </p>
             </div>
 
@@ -235,21 +258,21 @@ export default function DashboardPage() {
                   {weather?.current_weather ? <CloudSun className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
                 </div>
                 <span className="px-2.5 py-1 rounded-full bg-purple-100 text-purple-800 text-[11px] font-bold">
-                  {weather?.current_weather ? 'Live Context' : '78%'}
+                  {weather?.current_weather ? 'Live Context' : (user?.district ? 'Microclimate' : 'Location Needed')}
                 </span>
               </div>
               <div className="text-xs font-medium text-slate-500">
-                {weather?.current_weather ? 'Local Weather Signal' : t('dashboard.businessReadiness')}
+                {weather?.current_weather ? 'Local Weather Signal' : 'District Climate Context'}
               </div>
               <div className="text-xl font-black text-slate-900 mt-1">
                 {weather?.current_weather?.temperature_c !== undefined 
                   ? `${Math.round(weather.current_weather.temperature_c)}°C • ${weather.current_weather.condition_description || 'Clear'}`
-                  : '78 / 100'}
+                  : (user?.district ? 'Loading Climate...' : 'Set Location')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 {weather?.current_weather?.wind_speed_kmh !== undefined 
                   ? `Wind ${Math.round(weather.current_weather.wind_speed_kmh)} km/h • Humidity ${weather.current_weather.relative_humidity_pct}%` 
-                  : 'Good potential, Minor gaps to fill'}
+                  : (user?.district ? 'Open-Meteo microclimate signal' : 'Configure district in profile')}
               </p>
             </div>
 
@@ -260,7 +283,7 @@ export default function DashboardPage() {
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2">
               <div className="flex items-center gap-2 text-slate-900 font-bold text-xs">
                 <Compass className="w-4 h-4 text-emerald-600" />
-                <span>Empirical District Research Intelligence ({activeDistrictName}, {selectedState})</span>
+                <span>Empirical District Research Intelligence ({activeDistrictName}, {user?.state || ''})</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {observations.slice(0, 4).map((obs: string, idx: number) => (

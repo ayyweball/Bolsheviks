@@ -140,24 +140,82 @@ export interface ProgramRecommendationItem {
   benefit_summary?: string | null;
 }
 
-export interface RecommendationUserProfile {
-  social_category?: string;
-  gender?: string;
-  is_rural?: boolean;
-  is_differently_abled?: boolean;
-  age?: number;
+// ============================================================================
+// 1b. Deterministic Statutory Eligibility Schemas (POST /api/v1/programs/evaluate-eligibility)
+// ============================================================================
+
+export interface UserProfile {
+  age?: number | null;
+  gender?: string | null;
+  social_category?: string | null;
+  is_differently_abled?: boolean | null;
+  is_ex_serviceman?: boolean | null;
+  state?: string | null;
+  district?: string | null;
+  is_rural?: boolean | null;
+  annual_income?: number | null;
+  project_cost?: number | null;
+  requested_loan_amount?: number | null;
+  is_new_business?: boolean | null;
+  sector?: string | null;
+  business_type?: string | null;
+  previous_tarun_repaid?: boolean | null;
+  is_traditional_artisan?: boolean | null;
+  is_street_vendor?: boolean | null;
+}
+
+export interface FinancialConstraints {
+  min_loan_amount?: number | null;
+  max_loan_amount?: number | null;
+  min_project_cost?: number | null;
+  max_project_cost?: number | null;
+  max_subsidy_amount?: number | null;
+  subsidy_percentage?: number | null;
+  max_guarantee_limit?: number | null;
+  guarantee_coverage_pct?: number | null;
+  interest_rate_min?: number | null;
+  interest_rate_max?: number | null;
+}
+
+export interface ProgramEligibilityResult {
+  program_id: number;
+  program_code: string;
+  program_name: string;
+  primary_type: string;
+  actionability_type: string;
+  is_eligible: boolean;
+  status: 'Eligible' | 'Ineligible' | 'Partially Verified' | string;
+  reasons: string[];
+  disqualifying_reasons: string[];
+  unverified_criteria: string[];
+  financial_constraints?: FinancialConstraints | null;
+  official_portal_url?: string | null;
+  benefit_summary?: string | null;
+}
+
+export interface ProgramEligibilityAssessmentResponse {
+  total_evaluated: number;
+  total_eligible: number;
+  total_ineligible: number;
+  total_partially_verified: number;
+  eligible_programs: ProgramEligibilityResult[];
+  ineligible_programs: ProgramEligibilityResult[];
+  partially_verified_programs: ProgramEligibilityResult[];
+  directly_recommendable_count: number;
+  component_recommendable_count: number;
+  platform_count: number;
+  framework_count: number;
+}
+
+export interface RecommendationUserProfile extends UserProfile {
   annual_turnover?: number;
   investment_in_plant?: number;
-  sector?: string;
   enterprise_type?: string;
-  state?: string;
-  district?: string;
-  is_new_business?: boolean;
 }
 
 export interface RecommendationRequest {
   business_profile_id?: number | null;
-  profile?: RecommendationUserProfile | null;
+  profile?: UserProfile | RecommendationUserProfile | null;
   target_financing_need?: number | null;
   preferred_assistance_type?: string | null;
   top_k?: number;
@@ -434,6 +492,17 @@ class BackendApiClient {
       `/api/v1/research/district-market-context${qs ? `?${qs}` : ''}`,
       { method: 'GET' }
     );
+  }
+
+  /**
+   * Evaluate user/business profile against all 60 government programmes using deterministic statutory rules
+   * POST /api/v1/programs/evaluate-eligibility
+   */
+  async evaluatePrograms(profile: UserProfile): Promise<ProgramEligibilityAssessmentResponse> {
+    return this.request<ProgramEligibilityAssessmentResponse>('/api/v1/programs/evaluate-eligibility', {
+      method: 'POST',
+      body: JSON.stringify(profile),
+    });
   }
 
   /**

@@ -8,14 +8,25 @@ datasource db {
 }
 
 model User {
-  id           String        @id @default(uuid())
-  phone        String        @unique
-  name         String
-  language     String        @default("en") // "en" or "hi"
-  state        String        @default("Uttar Pradesh")
-  district     String        @default("Lucknow")
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                  String        @id @default(uuid())
+  phone               String        @unique
+  name                String
+  email               String?
+  age                 Int?
+  language            String        @default("en") // "en" or "hi"
+  state               String        @default("Uttar Pradesh")
+  district            String        @default("Lucknow")
+  lgdDistrictCode     String?
+  isRural             Boolean?
+  gender              String?
+  socialCategory      String?
+  isDifferentlyAbled  Boolean?
+  isExServiceman      Boolean?
+  isTraditionalArtisan Boolean?
+  isStreetVendor      Boolean?
+  isStartup           Boolean?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   businesses   Business[]
   advisories   Advisory[]
@@ -24,15 +35,28 @@ model User {
 }
 
 model Business {
-  id                  String        @id @default(uuid())
-  userId              String
-  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type                String        // "agriculture", "retail", "services", "manufacturing", "transport"
-  description         String?
-  estimatedCapital    Float
-  targetMonthlyIncome Float?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  id                   String        @id @default(uuid())
+  userId               String
+  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sector               String?       // "Manufacturing", "Services", "Trading", "Agriculture"
+  type                 String        // Specific trade or business description
+  activity             String?
+  stage                String?
+  description          String?
+  isNewBusiness        Boolean?
+  estimatedCapital     Float
+  targetMonthlyIncome  Float?
+  annualIncome         Float?
+  annualTurnover       Float?
+  monthlyIncome        Float?
+  monthlyExpenses      Float?
+  existingDebt         Float?
+  existingMonthlyEmi   Float?
+  projectCost          Float?
+  requestedFinancing   Float?
+  promoterContribution Float?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
 
   advisories   Advisory[]
   progressLogs ProgressLog[]
