@@ -16,10 +16,16 @@ from app.schemas.recommendation import (
     RecommendationResponse,
 )
 from app.schemas.district_msme import DistrictMarketContext
+from app.schemas.financial_structuring import (
+    FinancialStructuringRequest,
+    FinancialStructuringResponse,
+)
 from app.services.recommendation_service import recommendation_service
 from app.services.district_msme_service import district_msme_service
+from app.services.financial_structuring_service import financial_structuring_service
 
 router = APIRouter(prefix="/recommendations", tags=["Programme Recommendations & Market Context"])
+
 
 
 @router.post(
@@ -68,3 +74,22 @@ def get_district_market_context(
             detail="No MSME market records found for the specified district or state parameters.",
         )
     return context
+
+
+@router.post(
+    "/financial-structuring",
+    response_model=FinancialStructuringResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Generate deterministic financial structuring and amortization scenarios",
+)
+def calculate_financial_structuring(
+    request: FinancialStructuringRequest,
+    db: Session = Depends(get_db),
+) -> FinancialStructuringResponse:
+    """Generate deterministic financial structuring for a government programme.
+    
+    Computes equity margin, statutory subsidies, bank debt, credit guarantee coverage,
+    and 3-tier repayment amortization scenarios without LLM/ML intervention.
+    """
+    return financial_structuring_service.calculate_structure(db=db, request=request)
+
