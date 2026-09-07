@@ -94,6 +94,35 @@ export async function POST(req: Request) {
     };
 
     const dpr = await backendApiClient.generateDPR(dprPayload);
+
+    // Persist to Advisory or Report store for seamless page reloads and report sharing
+    try {
+      if (body.advisoryId) {
+        await prisma.advisory.update({
+          where: { id: body.advisoryId },
+          data: { planJson: JSON.stringify(dpr) },
+        }).catch(() => null);
+      }
+      if (user && primaryBiz?.id) {
+        await prisma.report.upsert({
+          where: { id: dpr.report_id },
+          create: {
+            id: dpr.report_id,
+            businessId: primaryBiz.id,
+            userId: user.id,
+            advisoryId: body.advisoryId || undefined,
+            jsonData: JSON.stringify(dpr),
+            expiresAt: new Date(Date.now() + 7 * 86400000),
+          },
+          update: {
+            jsonData: JSON.stringify(dpr),
+          },
+        }).catch(() => null);
+      }
+    } catch (saveErr) {
+      console.warn('Could not persist DPR to database:', saveErr);
+    }
+
     return NextResponse.json(dpr);
   } catch (error: any) {
     console.error('Error generating structured DPR in /api/advisory/dpr:', error);

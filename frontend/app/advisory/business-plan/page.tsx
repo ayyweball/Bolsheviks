@@ -233,6 +233,7 @@ function RebuiltDPRBuilderContent() {
         gender: form.gender,
         education_level: form.educationLevel,
         selected_program_code: form.selectedProgramCode,
+        advisoryId: searchParams.get('advisoryId') || undefined,
         qualitative_overrides: qualitativeEdits,
       };
 
@@ -248,6 +249,11 @@ function RebuiltDPRBuilderContent() {
       }
 
       const data: DPRResponse = await res.json();
+      if (typeof window !== 'undefined' && data?.report_id) {
+        try {
+          sessionStorage.setItem(`current_dpr_${data.report_id}`, JSON.stringify(data));
+        } catch (_) {}
+      }
       setDprResult(data);
     } catch (err: any) {
       console.error('DPR generation error:', err);
@@ -543,6 +549,11 @@ function RebuiltDPRBuilderContent() {
                         className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500 bg-white"
                       >
                         <option value="">-- Select a Government Programme --</option>
+                        {form.selectedProgramCode && !['PMEGP_NEW', 'PMFME', 'STANDUP_INDIA', 'PM_MUDRA_KISHORE', 'PM_MUDRA_TARUN', 'CGTMSE'].includes(form.selectedProgramCode) && (
+                          <option value={form.selectedProgramCode}>
+                            {form.selectedProgramCode.replace(/_/g, ' ')} (Selected Scheme)
+                          </option>
+                        )}
                         <option value="PMEGP_NEW">Prime Minister Employment Generation Programme (PMEGP)</option>
                         <option value="PMFME">PM Formalisation of Micro Food Processing Enterprises (PMFME)</option>
                         <option value="STANDUP_INDIA">Stand-Up India Scheme (SC/ST & Women)</option>
@@ -1266,7 +1277,14 @@ function RebuiltDPRBuilderContent() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => router.push(`/advisory/business-plan/${dprResult.report_id}`)}
+                        onClick={() => {
+                          if (typeof window !== 'undefined' && dprResult?.report_id) {
+                            try {
+                              sessionStorage.setItem(`current_dpr_${dprResult.report_id}`, JSON.stringify(dprResult));
+                            } catch (_) {}
+                          }
+                          router.push(`/advisory/business-plan/${dprResult.report_id}`);
+                        }}
                         className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
                       >
                         <FileText className="w-4 h-4" />

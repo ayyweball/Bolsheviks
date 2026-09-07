@@ -183,6 +183,7 @@ export async function POST(req: Request) {
         assistanceSummary: structResp.assistance_summary,
         debtToIncomeRatio: Number(structResp.debt_health.existing_dti_pct.toFixed(1)),
         affordableEMI: Math.round(structResp.debt_health.affordable_emi_cap),
+        recommendedMonthlyEMI: balancedScenario?.monthly_emi != null ? Math.round(balancedScenario.monthly_emi) : null,
         uncommittedSurplus: Math.round(structResp.debt_health.uncommitted_surplus),
         creditAssessment: `${structResp.debt_health.dti_health_category.replace(/_/g, ' ')} Risk`,
         dtiHealthCategory: structResp.debt_health.dti_health_category,

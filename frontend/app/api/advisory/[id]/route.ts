@@ -16,6 +16,21 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     });
 
     if (!advisory) {
+      const report = await prisma.report.findUnique({
+        where: { id: params.id },
+      });
+      if (report) {
+        const parsedPlan = typeof report.jsonData === 'string' ? JSON.parse(report.jsonData) : report.jsonData;
+        return NextResponse.json({
+          advisory: {
+            id: report.id,
+            planJson: parsedPlan,
+            businessId: report.businessId,
+            userId: report.userId,
+            status: 'active',
+          }
+        });
+      }
       return NextResponse.json({ error: 'Advisory not found' }, { status: 404 });
     }
 
@@ -34,6 +49,26 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         financialJson: parsedFinancial,
       }
     });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+export async function PUT(req: Request, { params }: { params: { id: string } }) {
+  try {
+    const body = await req.json();
+    const updateData: any = {};
+    if (body.planJson !== undefined) {
+      updateData.planJson = typeof body.planJson === 'string' ? body.planJson : JSON.stringify(body.planJson);
+    }
+    if (body.financialJson !== undefined) {
+      updateData.financialJson = typeof body.financialJson === 'string' ? body.financialJson : JSON.stringify(body.financialJson);
+    }
+    const updated = await prisma.advisory.update({
+      where: { id: params.id },
+      data: updateData,
+    });
+    return NextResponse.json({ success: true, advisory: updated });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

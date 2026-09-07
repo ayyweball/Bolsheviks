@@ -105,11 +105,29 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
                 <div>
                   <div className="text-xs font-bold text-emerald-800">{t('advisory.affordableEMI')}</div>
                   <div className="text-2xl font-black text-emerald-900 mt-0.5">
-                    {fin.affordableEMI != null ? `₹${fin.affordableEMI.toLocaleString('en-IN')} / mo` : 'Not available'}
+                    {(() => {
+                      if (fin.isFinancingApplicable === false) {
+                        return 'Not applicable';
+                      }
+                      const headlineEMI = fin.recommendedMonthlyEMI ?? structures?.balanced?.monthlyEMI;
+                      if (headlineEMI != null) {
+                        return `₹${headlineEMI.toLocaleString('en-IN')} / mo`;
+                      }
+                      return 'Not calculated';
+                    })()}
                   </div>
-                  <div className="text-[11px] text-emerald-700 mt-1">Dual-gate verified safe repayment capacity</div>
+                  <div className="text-[11px] text-emerald-700 mt-1">Affordable EMI based on available financial inputs</div>
+                  {fin.isFinancingApplicable !== false && fin.affordableEMI != null && (
+                    <div className="text-[10px] text-slate-500 mt-1.5 pt-1.5 border-t border-emerald-200/60">
+                      {fin.affordableEMI === 0 ? (
+                        <span>Safe surplus ceiling: ₹0 / mo (Cashflow note: declared outflows exceed income)</span>
+                      ) : (
+                        <span>Safe surplus ceiling: ₹{fin.affordableEMI.toLocaleString('en-IN')} / mo</span>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
                   <BadgeIndianRupee className="w-6 h-6" />
                 </div>
               </div>
@@ -139,7 +157,7 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
                       : 'Not specified in profile'}
                   </div>
                   <div className="text-[10px] text-amber-700 font-semibold">
-                    USER PROVIDED • Stated in Business Profile
+                    Stated in Business Profile
                   </div>
                 </div>
 
@@ -151,7 +169,7 @@ export default function FinancialResultsPage({ params }: { params: { id: string 
                     {promoterMarginAmt != null ? `₹${Math.round(promoterMarginAmt).toLocaleString('en-IN')}` : 'As per scheme rules'}
                   </div>
                   <div className="text-[10px] text-slate-400">
-                    {capital?.is_statutory_margin ? 'Authoritative statutory equity rule' : 'GOVERNMENT / DATASET DERIVED'}
+                    {capital?.is_statutory_margin ? 'Authoritative statutory equity rule' : (promoterMarginPct != null ? 'Programme requirement' : 'Not specified by programme data')}
                   </div>
                 </div>
 

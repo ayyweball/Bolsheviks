@@ -133,11 +133,24 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
 
       let canonicalDPR: DPRResponse | null = null;
 
+      // Check client-side session cache first for instant navigation and refresh
+      if (typeof window !== 'undefined' && params.planId) {
+        try {
+          const sessionSnapshot = sessionStorage.getItem(`current_dpr_${params.planId}`);
+          if (sessionSnapshot) {
+            const parsed = JSON.parse(sessionSnapshot) as DPRResponse;
+            if (parsed?.report_id && parsed?.capital_structure && parsed?.government_support) {
+              canonicalDPR = parsed;
+            }
+          }
+        } catch (_) {}
+      }
+
       const u = profRes?.user || {};
       const b = profRes?.business || {};
 
       // Case A: check if advisory exists and has a valid planJson
-      if (advRes?.advisory?.planJson?.executive_summary && advRes?.advisory?.planJson?.capital_structure) {
+      if (!canonicalDPR && advRes?.advisory?.planJson?.executive_summary && advRes?.advisory?.planJson?.capital_structure) {
         const cachedDPR = advRes.advisory.planJson as DPRResponse;
 
         // Determine whether cached snapshot matches current user profile
@@ -159,12 +172,20 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
 
       // Case B: If missing, stale, or directly requesting fresh DPR, synthesize from current profile
       if (!canonicalDPR) {
-        const targetProgram = searchParams.get('programCode') || advRes?.advisory?.selectedProgramCode || advRes?.advisory?.planJson?.government_support?.program_code;
+        const targetProgram = searchParams.get('programCode')
+          || advRes?.advisory?.financialJson?.programCode
+          || advRes?.advisory?.financialJson?.program_code
+          || advRes?.advisory?.financialJson?.selectedProgramCode
+          || advRes?.advisory?.selectedProgramCode
+          || advRes?.advisory?.planJson?.government_support?.program_code;
         const targetDistrict = u.district || b.district;
         const targetState = u.state || b.state;
         const targetBusinessType = b.type || b.activity || b.sector;
         const targetSubType = b.activity || b.description || b.sector;
-        const targetCapital = b.projectCost || b.estimatedCapital;
+        const targetCapital = b.projectCost || b.estimatedCapital || advRes?.advisory?.financialJson?.projectCost;
+        const targetPromoter = b.promoterContribution != null ? Number(b.promoterContribution) : (advRes?.advisory?.financialJson?.userPromoterContribution != null ? Number(advRes?.advisory?.financialJson?.userPromoterContribution) : undefined);
+        const targetIncome = b.annualTurnover || (b.monthlyIncome ? b.monthlyIncome * 12 : undefined) || (advRes?.advisory?.financialJson?.monthlyIncome ? advRes.advisory.financialJson.monthlyIncome * 12 : undefined);
+        const targetDebt = b.existingDebt != null ? Number(b.existingDebt) : (advRes?.advisory?.financialJson?.existingDebt != null ? Number(advRes?.advisory?.financialJson?.existingDebt) : undefined);
 
         if (!targetProgram) {
           throw new Error('Select a government programme to calculate programme-specific financing and generate the DPR.');
@@ -188,9 +209,9 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
             activity: b.activity,
             stage: b.stage || (b.isNewBusiness === false ? 'Expansion' : 'Greenfield / New Venture'),
             estimated_capital: targetCapital,
-            user_promoter_contribution: b.promoterContribution != null ? Number(b.promoterContribution) : undefined,
-            current_income: b.annualTurnover || (b.monthlyIncome ? b.monthlyIncome * 12 : undefined),
-            existing_debt: b.existingDebt != null ? Number(b.existingDebt) : undefined,
+            user_promoter_contribution: targetPromoter,
+            current_income: targetIncome,
+            existing_debt: targetDebt,
             selected_program_code: targetProgram,
             category: u.socialCategory || u.category || 'GENERAL',
             gender: u.gender || 'MALE',
@@ -203,8 +224,22 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
           setAdvisoryMeta({
             id: params.planId,
             planJson: dprData,
+            financialJson: advRes?.advisory?.financialJson,
             business: b,
           });
+          if (typeof window !== 'undefined' && dprData?.report_id) {
+            try {
+              sessionStorage.setItem(`current_dpr_${params.planId}`, JSON.stringify(dprData));
+              sessionStorage.setItem(`current_dpr_${dprData.report_id}`, JSON.stringify(dprData));
+            } catch (_) {}
+          }
+          if (params.planId && params.planId !== 'new' && !params.planId.startsWith('DPR-')) {
+            fetch(`/api/advisory/${params.planId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ planJson: dprData }),
+            }).catch(() => null);
+          }
         } else {
           const errData = await dprRes.json().catch(() => ({}));
           throw new Error(errData.error || 'Could not synthesize canonical Detailed Project Report.');
