@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { resolvePrimaryBusiness } from '@/lib/business-resolver';
 
 async function getOrInitUser() {
   let user = await getCurrentUser();
@@ -20,17 +21,16 @@ async function getOrInitUser() {
   return user;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const user = await getOrInitUser();
     const fullUser = await prisma.user.findUnique({
       where: { id: user.id },
     });
 
-    const business = await prisma.business.findFirst({
-      where: { userId: user.id },
-      orderBy: { createdAt: 'desc' },
-    });
+    const url = new URL(req.url);
+    const requestedBusinessId = url.searchParams.get('businessId');
+    const business = await resolvePrimaryBusiness(user.id, requestedBusinessId);
 
     return NextResponse.json({
       user: fullUser,
@@ -139,10 +139,9 @@ export async function PUT(req: Request) {
 
     // --- Upsert Primary Business ---
     const tradeType = businessType || type;
-    const existingBusiness = await prisma.business.findFirst({
-      where: { userId: user.id },
-      orderBy: { createdAt: 'desc' },
-    });
+    const existingBusiness = body.businessId
+      ? await prisma.business.findUnique({ where: { id: body.businessId } })
+      : await resolvePrimaryBusiness(user.id);
 
     const parsedProjectCost = projectCost !== undefined && projectCost !== null && projectCost !== ''
       ? parseFloat(projectCost.toString())

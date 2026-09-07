@@ -2,6 +2,21 @@ import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { backendApiClient, FinancialStructuringRequest } from '@/lib/api-client';
+import { resolvePrimaryBusiness } from '@/lib/business-resolver';
+
+const KNOWN_PROGRAM_ALIASES: Record<string, string> = {
+  'PMEGP': 'PMEGP_NEW',
+  'PMEGP_NEW': 'PMEGP_NEW',
+  'STAND_UP_INDIA': 'STANDUP_INDIA',
+  'STANDUP_INDIA': 'STANDUP_INDIA',
+  'MUDRA_TARUN': 'PM_MUDRA_TARUN',
+  'PM_MUDRA_TARUN': 'PM_MUDRA_TARUN',
+  'MUDRA_KISHORE': 'PM_MUDRA_KISHORE',
+  'PM_MUDRA_KISHORE': 'PM_MUDRA_KISHORE',
+  'MUDRA_SHISHU': 'PM_MUDRA_SHISHU',
+  'PM_MUDRA_SHISHU': 'PM_MUDRA_SHISHU',
+  'CGTMSE': 'CGTMSE',
+};
 
 export async function POST(req: Request) {
   try {
@@ -36,11 +51,14 @@ export async function POST(req: Request) {
       collateralAvailable,
       programId,
       programCode,
+      advisoryId,
     } = body;
 
     const [dbUser, dbBusiness] = await Promise.all([
       prisma.user.findUnique({ where: { id: user.id } }),
-      prisma.business.findFirst({ where: { userId: user.id }, orderBy: { createdAt: 'desc' } }),
+      businessId
+        ? prisma.business.findUnique({ where: { id: businessId } })
+        : resolvePrimaryBusiness(user.id),
     ]);
 
     // Financial Inputs without Fabrication: Require explicit or saved values
@@ -74,9 +92,16 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!programId && !programCode) {
+    // Resolve Canonical Scheme Code (zero-fabrication: never default unknown or missing schemes to PMEGP_NEW)
+    let resolvedProgramCode: string | undefined = undefined;
+    if (programCode && programCode.toString().trim() !== '') {
+      const cleanUpper = programCode.toString().trim().toUpperCase();
+      resolvedProgramCode = KNOWN_PROGRAM_ALIASES[cleanUpper] || programCode.toString().trim();
+    }
+
+    if (!programId && !resolvedProgramCode) {
       return NextResponse.json(
-        { error: 'A valid government programme (programId or programCode) is required for deterministic financial structuring.' },
+        { error: 'A valid government programme (programId or canonical programCode) is required for deterministic financial structuring. Please select a statutory programme.' },
         { status: 400 }
       );
     }
@@ -101,7 +126,7 @@ export async function POST(req: Request) {
     // 1. Authoritative Call to FastAPI Backend Core
     const structReq: FinancialStructuringRequest = {
       program_id: programId ? parseInt(programId.toString()) : undefined,
-      program_code: programCode ? programCode.toString() : undefined,
+      program_code: resolvedProgramCode,
       project_cost: projectCost,
       requested_loan_amount: requestedLoan || undefined,
       monthly_income: income,
@@ -199,21 +224,35 @@ export async function POST(req: Request) {
       busId = bus.id;
     }
 
-    // Save Advisory entity
-    const advisory = await prisma.advisory.create({
-      data: {
-        businessId: busId,
-        userId: user.id,
-        type: 'financial',
-        financialJson: JSON.stringify(financialResult),
-        status: 'active',
-      },
-    });
+    // Save or update Advisory entity
+    let savedAdvisoryId = advisoryId;
+    if (savedAdvisoryId) {
+      try {
+        await prisma.advisory.update({
+          where: { id: savedAdvisoryId },
+          data: {
+            financialJson: JSON.stringify(financialResult),
+          },
+        });
+      } catch (err) {
+        console.warn('Could not update existing advisory:', err);
+      }
+    } else {
+      const newAdv = await prisma.advisory.create({
+        data: {
+          businessId: busId,
+          userId: user.id,
+          type: 'financial',
+          financialJson: JSON.stringify(financialResult),
+          status: 'active',
+        },
+      });
+      savedAdvisoryId = newAdv.id;
+    }
 
     return NextResponse.json({
-      advisoryId: advisory.id,
+      advisoryId: savedAdvisoryId,
       businessId: busId,
-      advisory,
       ...financialResult,
     });
   } catch (error: any) {

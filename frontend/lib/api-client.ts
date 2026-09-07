@@ -328,6 +328,7 @@ export interface FinancialStructuringResponse {
 // ============================================================================
 
 export interface DistrictCoordinates {
+  district_id?: number | null;
   district_name: string;
   state_name: string;
   lg_dt_code?: string | null;
@@ -338,39 +339,68 @@ export interface DistrictCoordinates {
 }
 
 export interface DistrictMarketContext {
+  geographic_level?: string;
+  state_name: string;
+  state_code?: string | null;
   district_name?: string | null;
-  state_name?: string | null;
   lg_dt_code?: string | null;
-  total_enterprises: number;
+  total_msmes: number;
   micro_enterprises: number;
   small_enterprises: number;
   medium_enterprises: number;
-  manufacturing_enterprises: number;
-  services_enterprises: number;
-  trading_enterprises: number;
-  state_rank_by_enterprises?: number | null;
+  micro_share: number;
+  small_share: number;
+  medium_share: number;
+  small_medium_share: number;
+  national_rank?: number | null;
+  total_districts_nationally?: number;
+  state_rank?: number | null;
   total_districts_in_state?: number | null;
+  is_fallback?: boolean;
+  market_context_notes?: string[];
+  // Backwards compatibility aliases
+  total_enterprises?: number;
+  state_rank_by_enterprises?: number | null;
   district_share_of_state_pct?: number | null;
   top_5_sectors?: string[] | null;
 }
 
-export interface DistrictWeatherSnapshot {
-  temperature_c?: number | null;
-  relative_humidity_pct?: number | null;
-  precipitation_mm?: number | null;
-  wind_speed_kmh?: number | null;
-  weather_condition_code?: number | null;
-  condition_description?: string | null;
-  retrieved_at?: string | null;
+export interface CurrentWeatherMetrics {
+  temperature_c: number;
+  relative_humidity_pct: number;
+  apparent_temperature_c: number;
+  precipitation_mm: number;
+  weather_code: number;
+  weather_description: string;
+  wind_speed_kmh: number;
+  observed_at?: string | null;
+}
+
+export interface DailyForecastDay {
+  date: string;
+  temp_max_c: number;
+  temp_min_c: number;
+  precipitation_sum_mm: number;
+  precipitation_probability_pct?: number | null;
+  wind_speed_max_kmh: number;
+  evapotranspiration_mm?: number | null;
+  weather_code: number;
+  weather_description: string;
 }
 
 export interface DistrictWeatherContext {
-  district_name: string;
-  state_name: string;
-  latitude: number;
-  longitude: number;
-  current_weather?: DistrictWeatherSnapshot | null;
-  forecast_daily?: any[] | null;
+  is_available: boolean;
+  is_stale: boolean;
+  source: string;
+  fetched_at?: string | null;
+  current?: CurrentWeatherMetrics | null;
+  forecast_3days: DailyForecastDay[];
+  weather_notes: string[];
+  // Backwards compatibility aliases
+  district_name?: string;
+  state_name?: string;
+  latitude?: number;
+  longitude?: number;
   cached_at?: string | null;
   cache_expires_at?: string | null;
   is_cached?: boolean;
@@ -386,6 +416,395 @@ export interface DistrictResearchContextResponse {
   weather_context?: DistrictWeatherContext | null;
   research_observations: string[];
   operational_cautions: string[];
+  disclaimer: string;
+}
+
+export interface BusinessProfileContext {
+  business_type?: string | null;
+  sub_type?: string | null;
+  experience_level?: string | null;
+  target_market?: string | null;
+  current_income?: number | null;
+  estimated_capital?: number | null;
+  existing_debt?: number | null;
+  additional_context?: string | null;
+}
+
+export interface MarketIntelligenceRequest {
+  district_name?: string | null;
+  state_name?: string | null;
+  lg_dt_code?: string | null;
+  business_profile?: BusinessProfileContext | null;
+}
+
+export interface ClusterQuantitativeIndicators {
+  total_msmes: number;
+  micro_enterprises: number;
+  small_enterprises: number;
+  medium_enterprises: number;
+  micro_share: number;
+  small_share: number;
+  medium_share: number;
+  small_medium_share: number;
+  national_density_percentile: number;
+  state_density_percentile: number;
+  sme_depth_score: number;
+  market_research_indicator: number;
+  cluster_mean_total_msmes: number;
+  cluster_mean_micro_share: number;
+  cluster_mean_sme_share: number;
+}
+
+export interface MarketResearchMLAnalysis {
+  is_available: boolean;
+  cluster_id: number;
+  cluster_label: string;
+  cluster_description: string;
+  features_used: string[];
+  quantitative_indicators: ClusterQuantitativeIndicators;
+  cluster_distribution_summary: Record<string, number>;
+  methodology_notes: string[];
+}
+
+export interface QualitativeLLMAnalysis {
+  is_available: boolean;
+  source: string;
+  market_interpretation: string;
+  opportunities: string[];
+  operational_considerations: string[];
+  competitive_considerations: string[];
+  risks: string[];
+  practical_recommendations: string[];
+  qualitative_notes: string[];
+}
+
+export interface WeatherRiskSignals {
+  heat_stress: string;
+  rain_disruption: string;
+  outdoor_activity: string;
+  logistics_disruption: string;
+}
+
+export interface DailyWeatherOutlookItem {
+  date: string;
+  day_name: string;
+  temp_range: string;
+  precipitation_sum_mm: number;
+  precipitation_probability_pct?: number | null;
+  weather_description: string;
+  impact_score: number;
+  impact_label: string;
+  outdoor_activity_signal: string;
+}
+
+export interface WeatherActivityImpactAnalysis {
+  is_available: boolean;
+  activity_impact_score?: number | null;
+  activity_impact_label?: string | null;
+  potential_footfall_effect?: string | null;
+  risk_signals?: WeatherRiskSignals | null;
+  business_type_implication?: string | null;
+  weather_outlook_3days: DailyWeatherOutlookItem[];
+  methodology_disclaimer: string;
+  heuristic_notes: string[];
+}
+
+export interface MarketIntelligenceResponse {
+  district_id?: number | null;
+  district_name: string;
+  state_name: string;
+  lg_dt_code?: string | null;
+  geographic_coordinates?: DistrictCoordinates | null;
+  market_context?: DistrictMarketContext | null;
+  weather_context?: DistrictWeatherContext | null;
+  ml_analysis: MarketResearchMLAnalysis;
+  llm_analysis: QualitativeLLMAnalysis;
+  weather_activity_impact?: WeatherActivityImpactAnalysis | null;
+  comparable_markets?: ComparableMarketContext | null;
+  research_observations: string[];
+  operational_cautions: string[];
+  disclaimer: string;
+}
+
+// ============================================================================
+// 4.1 NearestNeighbors Market Similarity Schemas
+// ============================================================================
+
+export interface ComparableDistrictItem {
+  district_id?: number | null;
+  district_name: string;
+  state_name: string;
+  similarity_rank: number;
+  similarity_distance: number;
+  total_msmes: number;
+  micro_share: number;
+  small_medium_share: number;
+  cluster_label?: string | null;
+  qualitative_observation: string;
+  provenance: string;
+}
+
+export interface ComparableMarketContext {
+  is_available: boolean;
+  target_district: string;
+  target_state: string;
+  comparable_districts: ComparableDistrictItem[];
+  features_used: string[];
+  methodology_notes: string[];
+  disclaimer: string;
+}
+
+// ============================================================================
+// 4.2 Canonical 13-Section Structured DPR Schemas
+// ============================================================================
+
+export interface CustomerSegmentItem {
+  segment: string;
+  need: string;
+  buying_consideration: string;
+  recommended_channel: string;
+  provenance: string;
+}
+
+export interface DPRRequest {
+  user_id?: string | null;
+  business_id?: string | null;
+  project_name?: string | null;
+  promoter_name?: string | null;
+  business_type: string;
+  sub_type?: string | null;
+  target_market?: string | null;
+  experience_level?: string | null;
+  estimated_capital: number;
+  current_income?: number | null;
+  existing_debt?: number | null;
+  district_name: string;
+  state_name?: string | null;
+  lg_dt_code?: string | null;
+  location_type?: string | null;
+  category?: string | null;
+  gender?: string | null;
+  education_level?: string | null;
+  is_differently_abled?: boolean | null;
+  is_ex_serviceman?: boolean | null;
+  selected_program_code?: string | null;
+  qualitative_overrides?: Record<string, any> | null;
+}
+
+export interface DPRExecutiveSummary {
+  project_name: string;
+  promoter_name: string;
+  business_type: string;
+  sub_type?: string | null;
+  location_district: string;
+  location_state: string;
+  total_project_cost: number;
+  recommended_program_code: string;
+  recommended_program_name: string;
+  promoter_contribution_amount?: number | null;
+  bank_loan_amount: number;
+  eligible_subsidy_amount: number;
+  monthly_emi: number;
+  executive_narrative: string;
+  provenance: string;
+}
+
+export interface DPRBusinessModel {
+  value_proposition: string;
+  target_segments_summary: string;
+  revenue_streams: string[];
+  key_activities: string[];
+  key_partners: string[];
+  cost_structure_summary: string[];
+  provenance: string;
+}
+
+export interface DPRMarketAnalysis {
+  total_msmes_in_district: number;
+  micro_enterprise_share: number;
+  small_medium_share: number;
+  national_rank?: number | null;
+  state_rank?: number | null;
+  cluster_archetype_label: string;
+  cluster_archetype_description: string;
+  market_research_indicator: number;
+  comparable_districts: ComparableDistrictItem[];
+  demand_drivers: string[];
+  market_barriers: string[];
+  provenance: string;
+}
+
+export interface DPRCustomerSegments {
+  customer_segments: CustomerSegmentItem[];
+  buying_behaviour_summary: string;
+  provenance: string;
+}
+
+export interface DPRCompetition {
+  competition_intensity: string;
+  competition_rationale: string;
+  market_structure_type: string;
+  differentiation_vectors: string[];
+  field_survey_gaps: string[];
+  provenance: string;
+}
+
+export interface DPRLocationAnalysis {
+  district_name: string;
+  state_name: string;
+  lg_dt_code?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  elevation_meters?: number | null;
+  connectivity_advantages: string[];
+  raw_material_proximity: string;
+  labor_availability: string;
+  provenance: string;
+}
+
+export interface DPROperationsPlan {
+  workflow_steps: string[];
+  key_machinery_equipment: string[];
+  utilities_and_power: string[];
+  workforce_roles: string[];
+  quality_assurance: string;
+  provenance: string;
+}
+
+export interface DPRMarketingStrategy {
+  positioning_statement: string;
+  sales_channels: string[];
+  customer_acquisition_methods: string[];
+  pricing_framework: string;
+  promotional_initiatives: string[];
+  provenance: string;
+}
+
+export interface DPRGovernmentSupport {
+  program_code: string;
+  program_name: string;
+  ministry: string;
+  program_category: string;
+  is_credit_linked: boolean;
+  eligible_subsidy_rate_pct?: number | null;
+  eligible_subsidy_amount: number;
+  max_subsidy_allowed?: number | null;
+  eligible_criteria_met: string[];
+  mandatory_statutory_conditions: string[];
+  nodal_agency: string;
+  provenance: string;
+}
+
+export interface DPRCapitalStructure {
+  total_project_cost: number;
+  promoter_equity_amount?: number | null;
+  promoter_equity_pct?: number | null;
+  initial_bank_loan?: number | null;
+  net_bank_loan_exposure?: number | null;
+  term_loan_amount?: number | null;
+  term_loan_pct?: number | null;
+  working_capital_amount?: number | null;
+  working_capital_pct?: number | null;
+  government_subsidy_amount: number;
+  government_subsidy_pct?: number | null;
+  is_statutorily_balanced: boolean;
+  structuring_notes: string[];
+  provenance: string;
+}
+
+export interface DebtServiceRepaymentYear {
+  year: number;
+  opening_balance: number;
+  annual_principal: number;
+  annual_interest: number;
+  total_annual_payment: number;
+  closing_balance: number;
+}
+
+export interface DPRFinancialAssumptions {
+  annual_interest_rate_pct?: number | null;
+  loan_tenure_months?: number | null;
+  moratorium_months?: number | null;
+  monthly_emi: number;
+  annual_debt_service: number;
+  total_interest_payable: number;
+  total_debt_outflow: number;
+  is_market_linked?: boolean;
+  is_benchmark_assumption?: boolean;
+  rate_type?: string | null;
+  rate_display_text?: string | null;
+  rate_note?: string | null;
+  amortization_schedule: DebtServiceRepaymentYear[];
+  methodology_notes: string[];
+  provenance: string;
+}
+
+export interface DPRRiskAnalysis {
+  weather_activity_impact_score?: number | null;
+  weather_activity_impact_label?: string | null;
+  heat_stress_level?: string | null;
+  rain_disruption_level?: string | null;
+  outdoor_activity_signal?: string | null;
+  logistics_disruption_level?: string | null;
+  identified_risks: Array<{ risk: string; severity: string; mitigation: string }>;
+  contingency_mitigations: string[];
+  provenance: string;
+}
+
+export interface DPRMilestoneItem {
+  phase_number: number;
+  month_range: string;
+  activity: string;
+  critical_deliverable: string;
+}
+
+export interface DPRImplementationPlan {
+  milestones: DPRMilestoneItem[];
+  critical_path_notes: string[];
+  provenance: string;
+}
+
+export interface DPRIllustrativeAssumptions {
+  capacity_utilization_schedule: string[];
+  working_capital_cycle_days: number;
+  operating_expense_benchmarks: string[];
+  break_even_commentary: string;
+  disclaimer: string;
+  provenance: string;
+}
+
+export interface DPRResearchGaps {
+  unorganized_data_gaps: string[];
+  recommended_field_checks: string[];
+  provenance: string;
+}
+
+export interface DPRResponse {
+  report_id: string;
+  generated_at: string;
+  project_name: string;
+  promoter_name: string;
+  business_type: string;
+  sub_type?: string | null;
+  district_name: string;
+  state_name: string;
+  lg_dt_code?: string | null;
+  executive_summary: DPRExecutiveSummary;
+  business_model: DPRBusinessModel;
+  market_analysis: DPRMarketAnalysis;
+  customer_segments: DPRCustomerSegments;
+  competition: DPRCompetition;
+  location_analysis: DPRLocationAnalysis;
+  operations_plan: DPROperationsPlan;
+  marketing_strategy: DPRMarketingStrategy;
+  government_support: DPRGovernmentSupport;
+  capital_structure: DPRCapitalStructure;
+  financial_assumptions: DPRFinancialAssumptions;
+  risk_analysis: DPRRiskAnalysis;
+  implementation_plan: DPRImplementationPlan;
+  illustrative_assumptions: DPRIllustrativeAssumptions;
+  research_gaps: DPRResearchGaps;
+  provenance_legend: Record<string, string>;
   disclaimer: string;
 }
 
@@ -495,6 +914,20 @@ class BackendApiClient {
   }
 
   /**
+   * Unified district market intelligence synthesizing ML clustering and qualitative LLM pipelines
+   * POST /api/v1/research/market-intelligence
+   */
+  async getMarketIntelligence(req: MarketIntelligenceRequest): Promise<MarketIntelligenceResponse> {
+    return this.request<MarketIntelligenceResponse>(
+      '/api/v1/research/market-intelligence',
+      {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }
+    );
+  }
+
+  /**
    * Evaluate user/business profile against all 60 government programmes using deterministic statutory rules
    * POST /api/v1/programs/evaluate-eligibility
    */
@@ -520,7 +953,19 @@ class BackendApiClient {
   async getLegacySchemeById(schemeId: number): Promise<any> {
     return this.request<any>(`/api/v1/schemes/${schemeId}`, { method: 'GET' });
   }
+
+  /**
+   * Generate canonical 13-section Structured Detailed Project Report (DPR)
+   * POST /api/v1/advisory/dpr
+   */
+  async generateDPR(payload: DPRRequest): Promise<DPRResponse> {
+    return this.request<DPRResponse>('/api/v1/advisory/dpr', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
 }
 
 export const backendApiClient = new BackendApiClient();
 export default backendApiClient;
+

@@ -64,7 +64,7 @@ export async function generateBusinessPlanAI(input: BusinessPlanInput) {
         messages: [
           {
             role: 'user',
-            content: `Generate a complete rural business plan advisory for:
+            content: `Generate a qualitative business plan advisory and operational implementation plan for:
 Business Type: ${input.businessType} (${input.subType || 'General'})
 Experience Level: ${input.experienceLevel}
 Target Market: ${input.targetMarket}
@@ -75,20 +75,20 @@ Location: ${input.district}, ${input.state}
 Context: ${input.additionalContext || 'None'}
 Language: ${input.language || 'en'}
 
+CRITICAL INSTRUCTIONS:
+- Do NOT invent or predict arbitrary revenue numbers, expenses, net profits, or break-even months.
+- Do NOT output an unverified feasibility score.
+- Focus strictly on qualitative business strategy, practical operational milestones, statutory licensing requirements, and risk mitigation.
+
 Respond ONLY with JSON matching this structure:
 {
-  "feasibilityScore": number (0-100),
+  "feasibilityStatus": "pending_dpr_audit",
   "executiveSummary": "string",
   "marketAnalysis": {
-    "demand": "Strong" | "Moderate" | "Growing",
-    "competition": "Low" | "Medium" | "High",
-    "growthPotential": "string",
+    "demandStatus": "Field Verification Required",
+    "competitionStatus": "Local Survey Required",
+    "growthOpportunities": "string",
     "targetCustomers": "string"
-  },
-  "financialProjections": {
-    "breakEvenMonth": number,
-    "month6": { "revenue": number, "expenses": number, "netProfit": number },
-    "month12": { "revenue": number, "expenses": number, "netProfit": number }
   },
   "actionTimeline": [
     { "month": 1, "title": "string", "description": "string", "completed": boolean }
@@ -104,63 +104,58 @@ Respond ONLY with JSON matching this structure:
       });
 
       const text = response.content[0].type === 'text' ? response.content[0].text : '';
-      return JSON.parse(text);
+      const parsed = JSON.parse(text);
+      // Ensure zero financial fabrication in output
+      return {
+        ...parsed,
+        feasibilityScore: null,
+        feasibilityStatus: 'pending_dpr_audit',
+        financialProjections: null,
+      };
     } catch (err) {
-      console.error('⚠️ Claude API call error, falling back to mock generator:', err);
+      console.error('⚠️ Claude API call error, falling back to qualitative generator:', err);
     }
   }
 
-  // Fallback intelligent mock generator
+  // Qualitative fallback generator (Zero-Fabrication)
   const isAgri = input.businessType.toLowerCase().includes('agri') || input.businessType.toLowerCase().includes('farm') || input.businessType.toLowerCase().includes('dairy');
   const cap = input.estimatedCapital || 500000;
-  const feasibility = Math.min(95, Math.max(65, Math.floor(75 + (input.currentIncome > 0 ? 10 : 0) - (input.existingDebt || 0) / 50000)));
 
   return {
-    feasibilityScore: feasibility,
-    executiveSummary: `Solid feasibility for ${input.businessType} micro-enterprise in ${input.district}, ${input.state}. High demand driven by regional market dynamics and favorable government scheme coverage (MoSJE / MUDRA / PMEGP).`,
+    feasibilityScore: null,
+    feasibilityStatus: 'pending_dpr_audit',
+    executiveSummary: `Strategic operational plan for ${input.businessType} micro-enterprise in ${input.district}, ${input.state}. Statutory financing eligibility can be structured through central and state schemes (PMEGP, MUDRA, MoSJE). Commercial viability requires verified local unit economics and formal DPR appraisal.`,
     marketAnalysis: {
-      demand: isAgri ? "Strong" : "Growing",
-      competition: "Moderate",
-      growthPotential: `High potential in rural ${input.district} area due to direct producer-to-consumer demand and state subsidies.`,
-      targetCustomers: isAgri ? "Local dairy co-operatives, village traders, and regional Mandi buyers" : "Hyper-local households, small businesses, and nearby weekly markets (Haat)."
+      demand: "Field Verification Required",
+      competition: "Local Survey Required",
+      growthOpportunities: `Enterprise scaling in ${input.district} is linked to securing formal credit linkages, reliable regional supply chains, and established off-take channels.`,
+      targetCustomers: input.targetMarket || (isAgri ? "Local agricultural co-operatives, village traders, and regional Mandi buyers (user-declared)" : "Hyper-local retail households and nearby market trade outlets (user-declared)")
     },
-    financialProjections: {
-      breakEvenMonth: Math.round(cap / 60000),
-      month6: {
-        revenue: Math.round(cap * 0.22),
-        expenses: Math.round(cap * 0.14),
-        netProfit: Math.round(cap * 0.08)
-      },
-      month12: {
-        revenue: Math.round(cap * 0.38),
-        expenses: Math.round(cap * 0.22),
-        netProfit: Math.round(cap * 0.16)
-      }
-    },
+    financialProjections: null,
     actionTimeline: [
-      { month: 1, title: "Registration & Site Setup", description: "Complete Udyam registration and secure site/lease.", completed: true },
-      { month: 2, title: "Equipment Purchase & Loan Sanction", description: `Apply for MoSJE / MUDRA / PMEGP loan of ₹${cap} at local bank branch.`, completed: false },
-      { month: 3, title: "Operational Trial Run", description: "Procure raw materials, inventory, or livestock and begin trial operations.", completed: false },
-      { month: 4, title: "Local Commercial Launch", description: "Establish sales agreements with local traders and retail outlets.", completed: false },
-      { month: 5, title: "Optimization & Quality Control", description: "Streamline daily operational costs and maintain cash reserve.", completed: false },
-      { month: 6, title: "Target Income Milestone", description: "Achieve stable monthly net profit target.", completed: false }
+      { month: 1, title: "Registration & Site Setup", description: "Complete Udyam registration and establish business premises/lease.", completed: true },
+      { month: 2, title: "Statutory Scheme Application", description: `Submit credit proposal for capital target of ₹${cap.toLocaleString('en-IN')} under PMEGP / MUDRA at local bank branch.`, completed: false },
+      { month: 3, title: "Procurement & Trial Operations", description: "Procure equipment/raw materials and initiate operational trial setup.", completed: false },
+      { month: 4, title: "Commercial Launch", description: "Establish supply linkages with regional buyers and local commercial network.", completed: false },
+      { month: 5, title: "Operations Streamlining", description: "Monitor operational overhead and build cash reserve buffer.", completed: false },
+      { month: 6, title: "Stabilization Milestone", description: "Review debt serviceability and working capital turnaround.", completed: false }
     ],
     requiredPermits: [
-      "Udyam Micro Registration (Free Online)",
-      "Local Gram Panchayat / DIC Trade License",
-      isAgri ? "FSSAI Basic Food License" : "Basic Shop & Establishment License",
-      "PAN & Bank Current Account"
+      "Udyam Micro Registration (Free Online Portal)",
+      "Local Gram Panchayat / Municipal Trade License",
+      isAgri ? "FSSAI Basic Registration / Food License" : "Shop & Establishment License (State Portal)",
+      "Business PAN & Current Bank Account"
     ],
     risks: [
-      { risk: "Seasonal cash flow fluctuations", impact: "Medium", mitigation: "Maintain 2 months operating expense reserve in bank account." },
-      { risk: "Raw material cost surge", impact: "Medium", mitigation: "Form cooperative buying ties with regional suppliers in " + input.district + "." },
-      { risk: "Loan repayment delay", impact: "High", mitigation: "Select 60-month balanced EMI structure under MoSJE/MUDRA scheme." }
+      { risk: "Working capital delays", impact: "Medium", mitigation: "Maintain at least 2 months operational expense reserve." },
+      { risk: "Input cost volatility", impact: "Medium", mitigation: "Establish multiple supplier relationships across " + input.district + "." },
+      { risk: "Credit repayment strain", impact: "High", mitigation: "Align borrowing tenure with verified disposable income using statutory amortization structures." }
     ],
     relevantSchemesPreview: [
-      "MoSJE Micro Finance Scheme (10% Margin Money : 90% SCA Loan)",
+      "Prime Minister's Employment Generation Programme (PMEGP)",
       "Pradhan Mantri MUDRA Yojana (Kishor / Tarun)",
-      "PMEGP 35% Margin Money Subsidy",
-      "UP Mukhya Mantri Yuva Swarozgar Yojana"
+      "Credit Guarantee Fund Trust for Micro and Small Enterprises (CGTMSE)",
+      "MoSJE Concessional Finance Schemes"
     ]
   };
 }
