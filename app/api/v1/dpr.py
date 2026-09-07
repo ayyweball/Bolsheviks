@@ -51,6 +51,8 @@ async def generate_dpr(
     try:
         response = await dpr_service.generate_dpr(db=db, request=payload)
         return response
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to generate DPR: %s", e, exc_info=True)
         raise HTTPException(

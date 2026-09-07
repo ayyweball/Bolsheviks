@@ -148,6 +148,67 @@ export default function SchemesPage() {
             </div>
           </div>
 
+          {/* Single Source of Truth Profile Inputs Banner */}
+          <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                  USER PROVIDED
+                </span>
+                <span className="text-xs font-bold text-slate-800">Using your saved Business Profile for Statutory Evaluation</span>
+              </div>
+              <Link
+                href="/dashboard/profile"
+                className="text-xs font-bold text-emerald-700 hover:underline flex items-center gap-1"
+              >
+                <span>Edit Business Profile</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="p-2.5 bg-slate-50 rounded-xl">
+                <span className="text-[10px] text-slate-400 block font-bold uppercase">Location</span>
+                <span className="font-bold text-slate-800 block truncate">
+                  {user?.district ? `${user.district}, ${user.state}` : 'Not configured'}
+                </span>
+                <span className="text-[9px] text-slate-500">{user?.isRural ? 'Rural Jurisdiction' : 'Urban Jurisdiction'}</span>
+              </div>
+
+              <div className="p-2.5 bg-slate-50 rounded-xl">
+                <span className="text-[10px] text-slate-400 block font-bold uppercase">Enterprise</span>
+                <span className="font-bold text-slate-800 block truncate">
+                  {business?.type || 'Enterprise'}
+                </span>
+                <span className="text-[9px] text-slate-500">{business?.sector || 'General Domain'}</span>
+              </div>
+
+              <div className="p-2.5 bg-slate-50 rounded-xl">
+                <span className="text-[10px] text-slate-400 block font-bold uppercase">Project Cost & Capital</span>
+                <span className="font-bold text-slate-800 block">
+                  ₹{(business?.projectCost || business?.estimatedCapital || 0).toLocaleString('en-IN')}
+                </span>
+                <span className="text-[9px] text-slate-500">
+                  {business?.promoterContribution ? `₹${business.promoterContribution.toLocaleString('en-IN')} promoter equity` : 'Self-contribution'}
+                </span>
+              </div>
+
+              <div className="p-2.5 bg-slate-50 rounded-xl">
+                <span className="text-[10px] text-slate-400 block font-bold uppercase">Demographics</span>
+                <span className="font-bold text-slate-800 block truncate">
+                  {user?.gender || 'Applicant'} • {user?.socialCategory || 'General'}
+                </span>
+                <span className="text-[9px] text-slate-500 truncate block">
+                  {user?.isTraditionalArtisan ? 'Artisan • ' : ''}
+                  {user?.isStreetVendor ? 'Street Vendor • ' : ''}
+                  {user?.isStartup ? 'Startup • ' : ''}
+                  {user?.isDifferentlyAbled ? 'PwD • ' : ''}
+                  {user?.isExServiceman ? 'Ex-Serviceman' : 'Standard Quota'}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Statutory Eligibility Assessment Gate Banner */}
           {eligibilitySummary && (
             <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-5 rounded-3xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">

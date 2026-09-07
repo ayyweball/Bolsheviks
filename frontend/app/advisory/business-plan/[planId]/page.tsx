@@ -133,30 +133,66 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
 
       let canonicalDPR: DPRResponse | null = null;
 
-      // Case A: advisory already contains the canonical 13-section DPRResponse
+      const u = profRes?.user || {};
+      const b = profRes?.business || {};
+
+      // Case A: check if advisory exists and has a valid planJson
       if (advRes?.advisory?.planJson?.executive_summary && advRes?.advisory?.planJson?.capital_structure) {
-        canonicalDPR = advRes.advisory.planJson as DPRResponse;
-        setAdvisoryMeta(advRes.advisory);
+        const cachedDPR = advRes.advisory.planJson as DPRResponse;
+
+        // Determine whether cached snapshot matches current user profile
+        const profileDistrict = u.district || b.district;
+        const profileBusinessType = b.type || b.activity || b.sector;
+        const queryProgram = searchParams.get('programCode');
+
+        const isStale = Boolean(
+          (queryProgram && cachedDPR.government_support?.program_code !== queryProgram) ||
+          (profileDistrict && cachedDPR.district_name.toLowerCase() !== profileDistrict.toLowerCase()) ||
+          (profileBusinessType && cachedDPR.business_type.toLowerCase() !== profileBusinessType.toLowerCase())
+        );
+
+        if (!isStale) {
+          canonicalDPR = cachedDPR;
+          setAdvisoryMeta(advRes.advisory);
+        }
       }
 
-      // Case B: If missing or directly requesting a DPR- prefix, call /api/advisory/dpr to synthesize
+      // Case B: If missing, stale, or directly requesting fresh DPR, synthesize from current profile
       if (!canonicalDPR) {
-        const u = profRes?.user || {};
-        const b = profRes?.business || {};
-        const targetProgram = searchParams.get('programCode') || advRes?.advisory?.selectedProgramCode || 'PMEGP_NEW';
+        const targetProgram = searchParams.get('programCode') || advRes?.advisory?.selectedProgramCode || advRes?.advisory?.planJson?.government_support?.program_code;
+        const targetDistrict = u.district || b.district;
+        const targetState = u.state || b.state;
+        const targetBusinessType = b.type || b.activity || b.sector;
+        const targetSubType = b.activity || b.description || b.sector;
+        const targetCapital = b.projectCost || b.estimatedCapital;
+
+        if (!targetProgram) {
+          throw new Error('Select a government programme to calculate programme-specific financing and generate the DPR.');
+        }
+
+        if (!targetDistrict || !targetBusinessType) {
+          throw new Error('Please ensure District and Business Type are configured in your Business Profile.');
+        }
 
         const dprRes = await fetch('/api/advisory/dpr', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            district_name: b.district || u.district || 'Varanasi',
-            state_name: b.state || u.state || 'Uttar Pradesh',
-            business_type: b.sector || b.type || 'Handloom & Textiles',
-            sub_type: b.description || 'Artisanal Manufacturing',
-            estimated_capital: b.projectCost || b.estimatedCapital || 1200000,
-            current_income: b.monthlyIncome ? b.monthlyIncome * 12 : 360000,
+            project_name: b.name || `${targetBusinessType} Enterprise`,
+            promoter_name: u.name || 'Entrepreneur',
+            district_name: targetDistrict,
+            state_name: targetState,
+            business_type: targetBusinessType,
+            sub_type: targetSubType,
+            sector: b.sector,
+            activity: b.activity,
+            stage: b.stage || (b.isNewBusiness === false ? 'Expansion' : 'Greenfield / New Venture'),
+            estimated_capital: targetCapital,
+            user_promoter_contribution: b.promoterContribution != null ? Number(b.promoterContribution) : undefined,
+            current_income: b.annualTurnover || (b.monthlyIncome ? b.monthlyIncome * 12 : undefined),
+            existing_debt: b.existingDebt != null ? Number(b.existingDebt) : undefined,
             selected_program_code: targetProgram,
-            category: u.category || 'GENERAL',
+            category: u.socialCategory || u.category || 'GENERAL',
             gender: u.gender || 'MALE',
           }),
         });
@@ -170,7 +206,8 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
             business: b,
           });
         } else {
-          throw new Error('Could not synthesize canonical Detailed Project Report.');
+          const errData = await dprRes.json().catch(() => ({}));
+          throw new Error(errData.error || 'Could not synthesize canonical Detailed Project Report.');
         }
       }
 
@@ -185,7 +222,7 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
 
   useEffect(() => {
     loadDPRData();
-  }, [params.planId]);
+  }, [params.planId, searchParams]);
 
   // Handle Regenerate DPR
   const handleRegenerate = async () => {
@@ -193,20 +230,41 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
     try {
       const u = userProfile?.user || {};
       const b = userProfile?.business || {};
-      const targetProgram = dpr?.government_support?.program_code || searchParams.get('programCode') || 'PMEGP_NEW';
+      const targetProgram = searchParams.get('programCode') || dpr?.government_support?.program_code;
+
+      if (!targetProgram) {
+        throw new Error('Select a government programme to calculate programme-specific financing and generate the DPR.');
+      }
+
+      const targetDistrict = u.district || b.district || dpr?.district_name;
+      const targetState = u.state || b.state || dpr?.state_name;
+      const targetBusinessType = b.type || b.activity || b.sector || dpr?.business_type;
+      const targetSubType = b.activity || b.description || dpr?.sub_type;
+      const targetCapital = b.projectCost || b.estimatedCapital || dpr?.capital_structure?.total_project_cost;
+
+      if (!targetDistrict || !targetBusinessType) {
+        throw new Error('Please ensure District and Business Type are configured in your Business Profile.');
+      }
 
       const dprRes = await fetch('/api/advisory/dpr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          district_name: dpr?.district_name || b.district || u.district || 'Varanasi',
-          state_name: dpr?.state_name || b.state || u.state || 'Uttar Pradesh',
-          business_type: dpr?.business_type || b.sector || b.type || 'Handloom & Textiles',
-          sub_type: dpr?.sub_type || b.description,
-          estimated_capital: dpr?.capital_structure?.total_project_cost || b.projectCost || 1200000,
-          current_income: b.monthlyIncome ? b.monthlyIncome * 12 : 360000,
+          project_name: b.name || `${targetBusinessType} Enterprise`,
+          promoter_name: u.name || dpr?.promoter_name || 'Entrepreneur',
+          district_name: targetDistrict,
+          state_name: targetState,
+          business_type: targetBusinessType,
+          sub_type: targetSubType,
+          sector: b.sector || dpr?.sector,
+          activity: b.activity || dpr?.activity,
+          stage: b.stage || (b.isNewBusiness === false ? 'Expansion' : 'Greenfield / New Venture') || dpr?.stage,
+          estimated_capital: targetCapital,
+          user_promoter_contribution: b.promoterContribution != null ? Number(b.promoterContribution) : undefined,
+          current_income: b.annualTurnover || (b.monthlyIncome ? b.monthlyIncome * 12 : undefined),
+          existing_debt: b.existingDebt != null ? Number(b.existingDebt) : undefined,
           selected_program_code: targetProgram,
-          category: u.category || 'GENERAL',
+          category: u.socialCategory || u.category || 'GENERAL',
           gender: u.gender || 'MALE',
         }),
       });
@@ -214,9 +272,13 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
       if (dprRes.ok) {
         const freshDPR = await dprRes.json();
         setDpr(freshDPR);
+      } else {
+        const errData = await dprRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to regenerate DPR.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Regeneration failed:', err);
+      alert(err.message || 'Regeneration failed');
     } finally {
       setRegenerating(false);
     }
@@ -423,6 +485,14 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
 
             <div className="flex items-center gap-2 flex-wrap">
               <Link
+                href={`/advisory/financial?id=${advisoryMeta?.id || params.planId}`}
+                className="px-3.5 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold flex items-center gap-1.5 transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Change Programme</span>
+              </Link>
+
+              <Link
                 href={`/advisory/business-plan?edit=true&planId=${params.planId}`}
                 className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition"
               >
@@ -490,7 +560,7 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
                   <span className="font-semibold text-slate-800">
                     {dpr.district_name}, {dpr.state_name}
                   </span>{' '}
-                  • Stage: <span className="font-semibold text-slate-800">Greenfield Formulation</span>
+                  • Stage: <span className="font-semibold text-slate-800">{dpr.stage || userProfile?.business?.stage || (userProfile?.business?.isNewBusiness === false ? 'Existing Enterprise (Expansion)' : 'Greenfield / New Venture')}</span>
                 </p>
               </div>
 
@@ -1232,6 +1302,13 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
                 <span className="px-3 py-1.5 rounded-xl bg-white text-emerald-900 border border-emerald-200 text-xs font-bold shadow-sm">
                   {gs.is_credit_linked ? 'Credit-Linked' : 'Non-Credit Programme'}
                 </span>
+                <Link
+                  href={`/advisory/financial?id=${advisoryMeta?.id || params.planId}`}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Change Programme</span>
+                </Link>
               </div>
             </div>
 
@@ -1367,15 +1444,39 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
                     <div className="text-[10px] text-slate-400 mt-0.5">Authoritative base</div>
                   </div>
 
+                  {/* User-Provided Promoter Contribution Card */}
+                  {(cs.user_promoter_contribution_amount != null || userProfile?.business?.promoterContribution != null) && (
+                    <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-200">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="text-blue-900 block text-[10px] font-bold uppercase">User Promoter Contribution</span>
+                        <ProvenanceBadge tag="USER PROVIDED" />
+                      </div>
+                      <strong className="text-blue-700 text-base font-black">
+                        ₹{(cs.user_promoter_contribution_amount ?? userProfile?.business?.promoterContribution).toLocaleString('en-IN')}
+                      </strong>
+                      <div className="text-[10px] text-blue-600 mt-0.5">
+                        {cs.user_promoter_contribution_pct != null
+                          ? `${cs.user_promoter_contribution_pct}% of project cost`
+                          : (cs.total_project_cost > 0
+                              ? `${(((cs.user_promoter_contribution_amount ?? userProfile?.business?.promoterContribution) / cs.total_project_cost) * 100).toFixed(1)}% of project cost`
+                              : 'Entrepreneur equity')}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Programme-Defined Promoter Contribution Card */}
                   <div className="p-3 bg-slate-50 rounded-xl border">
-                    <span className="text-slate-400 block text-[10px] font-bold uppercase">Promoter Contribution</span>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-slate-500 block text-[10px] font-bold uppercase">Programme Promoter Mandate</span>
+                      <ProvenanceBadge tag="GOVERNMENT / DATASET DERIVED" />
+                    </div>
                     {cs.promoter_equity_amount != null ? (
                       <>
-                        <strong className="text-blue-700 text-base font-black">
+                        <strong className="text-slate-900 text-base font-black">
                           ₹{cs.promoter_equity_amount.toLocaleString('en-IN')}
                         </strong>
                         <div className="text-[10px] text-slate-400 mt-0.5">
-                          {cs.promoter_equity_pct != null ? `${cs.promoter_equity_pct}% margin` : 'Self-equity'}
+                          {cs.promoter_equity_pct != null ? `${cs.promoter_equity_pct}% margin mandated` : 'Statutory requirement'}
                         </div>
                       </>
                     ) : (
@@ -1426,7 +1527,7 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
                   <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-[11px] text-amber-900 flex items-start gap-2">
                     <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                     <span>
-                      <strong>Promoter Contribution Notice:</strong> Authoritative scheme records for {gs.program_code} do not mandate a fixed statutory promoter margin. This value is preserved as null rather than fabricating a default 5% or 10% margin.
+                      <strong>Programme-defined promoter contribution:</strong> Not specified by authoritative programme data. Authoritative scheme records for {gs.program_code} do not mandate a fixed statutory promoter margin. This value is preserved as null rather than fabricating a default 5% or 10% margin.
                     </span>
                   </div>
                 )}
@@ -1707,9 +1808,12 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
                   <div className="flex-1 space-y-1">
                     <div className="flex items-center justify-between font-bold text-slate-900">
                       <span>{m.month_range}: {m.activity}</span>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white border text-slate-600">
-                        Phase {m.phase_number}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white border text-slate-600">
+                          Phase {m.phase_number}
+                        </span>
+                        {m.provenance && <ProvenanceBadge tag={m.provenance} />}
+                      </div>
                     </div>
                     <p className="text-slate-600">
                       <span className="font-semibold text-slate-700">Critical Deliverable:</span> {m.critical_deliverable}
@@ -1759,7 +1863,9 @@ export default function BusinessPlanResultsPage({ params }: { params: { planId: 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div className="p-4 bg-slate-50 rounded-2xl border space-y-1.5">
                 <span className="font-bold text-slate-900 uppercase text-[10px] block">Working Capital Cycle & Break-Even</span>
-                <p className="text-slate-700 font-semibold">Turnaround: {ia.working_capital_cycle_days} Days</p>
+                <p className="text-slate-700 font-semibold">
+                  Turnaround: {ia.working_capital_cycle_days != null ? `${ia.working_capital_cycle_days} Days` : 'Not calculated from available verified data.'}
+                </p>
                 <p className="text-slate-600">{ia.break_even_commentary}</p>
               </div>
 

@@ -104,12 +104,12 @@ export default function DashboardPage() {
     const primaryBusiness = businesses && businesses.length > 0 ? businesses[0] : null;
     const businessContext = primaryBusiness ? {
       business_type: primaryBusiness.type,
-      sub_type: primaryBusiness.subType,
-      experience_level: primaryBusiness.experienceLevel,
-      target_market: primaryBusiness.targetMarket,
-      current_income: primaryBusiness.currentIncome,
-      estimated_capital: primaryBusiness.estimatedCapital,
-      existing_debt: primaryBusiness.existingDebt,
+      sub_type: primaryBusiness.activity || primaryBusiness.description || undefined,
+      sector: primaryBusiness.sector || undefined,
+      stage: primaryBusiness.stage || undefined,
+      current_income: primaryBusiness.monthlyIncome ? primaryBusiness.monthlyIncome * 12 : (primaryBusiness.annualIncome || primaryBusiness.annualTurnover || undefined),
+      estimated_capital: primaryBusiness.projectCost || primaryBusiness.estimatedCapital || undefined,
+      existing_debt: primaryBusiness.existingDebt || undefined,
     } : undefined;
 
     fetch('/api/research/market-intelligence', {

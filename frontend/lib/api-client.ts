@@ -578,6 +578,10 @@ export interface DPRRequest {
   estimated_capital: number;
   current_income?: number | null;
   existing_debt?: number | null;
+  user_promoter_contribution?: number | null;
+  stage?: string | null;
+  sector?: string | null;
+  activity?: string | null;
   district_name: string;
   state_name?: string | null;
   lg_dt_code?: string | null;
@@ -596,12 +600,16 @@ export interface DPRExecutiveSummary {
   promoter_name: string;
   business_type: string;
   sub_type?: string | null;
+  sector?: string | null;
+  activity?: string | null;
+  stage?: string | null;
   location_district: string;
   location_state: string;
   total_project_cost: number;
   recommended_program_code: string;
   recommended_program_name: string;
   promoter_contribution_amount?: number | null;
+  user_promoter_contribution_amount?: number | null;
   bank_loan_amount: number;
   eligible_subsidy_amount: number;
   monthly_emi: number;
@@ -699,6 +707,9 @@ export interface DPRCapitalStructure {
   total_project_cost: number;
   promoter_equity_amount?: number | null;
   promoter_equity_pct?: number | null;
+  user_promoter_contribution_amount?: number | null;
+  user_promoter_contribution_pct?: number | null;
+  programme_promoter_note?: string | null;
   initial_bank_loan?: number | null;
   net_bank_loan_exposure?: number | null;
   term_loan_amount?: number | null;
@@ -756,6 +767,7 @@ export interface DPRMilestoneItem {
   month_range: string;
   activity: string;
   critical_deliverable: string;
+  provenance?: string;
 }
 
 export interface DPRImplementationPlan {
@@ -766,7 +778,7 @@ export interface DPRImplementationPlan {
 
 export interface DPRIllustrativeAssumptions {
   capacity_utilization_schedule: string[];
-  working_capital_cycle_days: number;
+  working_capital_cycle_days?: number | null;
   operating_expense_benchmarks: string[];
   break_even_commentary: string;
   disclaimer: string;
@@ -786,6 +798,9 @@ export interface DPRResponse {
   promoter_name: string;
   business_type: string;
   sub_type?: string | null;
+  sector?: string | null;
+  activity?: string | null;
+  stage?: string | null;
   district_name: string;
   state_name: string;
   lg_dt_code?: string | null;

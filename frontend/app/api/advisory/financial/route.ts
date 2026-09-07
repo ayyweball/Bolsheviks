@@ -197,6 +197,17 @@ export async function POST(req: Request) {
         statutoryConstraints: structResp.financial_constraints,
         warnings: structResp.warnings,
         disclaimer: structResp.disclaimer,
+        userPromoterContribution: dbBusiness?.promoterContribution != null ? Number(dbBusiness.promoterContribution) : (body.promoterContribution != null ? Number(body.promoterContribution) : null),
+        projectCost: projectCost,
+        requestedFinancing: requestedLoan,
+        monthlyIncome: income,
+        monthlyExpenses: expenses,
+        existingDebt: dbBusiness?.existingDebt ?? 0,
+        existingMonthlyEmi: finalExistingEmi,
+        businessType: dbBusiness?.type || undefined,
+        sector: dbBusiness?.sector || undefined,
+        district: dbUser?.district || undefined,
+        state: dbUser?.state || undefined,
         source: 'FastAPI Backend Core (Deterministic Financial Structuring)',
       };
     } catch (backendError: any) {

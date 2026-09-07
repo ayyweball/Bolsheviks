@@ -17,7 +17,8 @@ Master DPR Orchestration Service:
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
+from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.schemas.dpr import (
@@ -43,7 +44,13 @@ from app.schemas.dpr import (
 )
 from app.schemas.market_research import MarketResearchEvidence, CustomerSegmentItem
 from app.schemas.market_similarity import ComparableDistrictItem
-from app.schemas.financial_structuring import FinancialStructuringRequest, FinancialStructuringResponse
+from app.schemas.financial_structuring import (
+    FinancialStructuringRequest,
+    FinancialStructuringResponse,
+    CapitalStructureBreakdown,
+    DebtHealthIndicators,
+    StatutoryFinancialBounds,
+)
 from app.schemas.recommendation import RecommendationRequest
 from app.schemas.eligibility import UserProfile
 
@@ -52,6 +59,7 @@ from app.services.market_research_ml_service import market_research_ml_service
 from app.services.market_similarity_service import market_similarity_service
 from app.services.weather_business_impact_service import weather_business_impact_service
 from app.services.financial_structuring_service import FinancialStructuringService
+from app.services.program_eligibility_adapter import ProgramEligibilityAdapter
 from app.services.recommendation_service import RecommendationService
 from app.services.dpr_ai_service import dpr_ai_service
 from app.repositories.program_repository import program_repository
@@ -62,7 +70,11 @@ logger = logging.getLogger(__name__)
 KNOWN_PROGRAM_ALIASES: Dict[str, str] = {
     "PMEGP": "PMEGP_NEW",
     "STAND_UP_INDIA": "STANDUP_INDIA",
-    "MUDRA": "MUDRA_KISHORE",
+    "MUDRA": "PM_MUDRA_KISHORE",
+    "MUDRA_KISHORE": "PM_MUDRA_KISHORE",
+    "MUDRA_TARUN": "PM_MUDRA_TARUN",
+    "MUDRA_SHISHU": "PM_MUDRA_SHISHU",
+    "PM_MUDRA": "PM_MUDRA_KISHORE",
 }
 
 
@@ -192,7 +204,7 @@ class DPRService:
         # 6. Authoritative Government Scheme Resolution & Financial Structuring
         # ---------------------------------------------------------------------
         # Resolve target programme: explicit selection or authoritative recommendation
-        target_program_code = cls._resolve_target_program(db=db, request=request, resolved_sname=resolved_sname)
+        target_program_code = cls._resolve_target_program(db=db, request=request)
 
         # Execute authoritative deterministic financial structuring
         fin_struct = cls._calculate_authoritative_financials(
@@ -251,9 +263,22 @@ class DPRService:
             # Blocker 2 Fix: Zero arbitrary 70/30 split. Pass through only if authoritative, else None.
             term_loan = None
             term_loan_pct = None
-            working_cap = None
-            working_cap_pct = None
             is_balanced = True
+
+        user_promoter_amount = request.user_promoter_contribution
+        user_promoter_pct = (
+            round((user_promoter_amount / total_cost) * 100, 2)
+            if (user_promoter_amount is not None and total_cost > 0)
+            else None
+        )
+        programme_promoter_note = (
+            "Programme-defined promoter contribution: Not specified by authoritative programme data."
+            if promoter_equity is None
+            else None
+        )
+        resolved_sector = request.sector or request.business_type
+        resolved_activity = request.activity or request.sub_type
+        resolved_stage = request.stage or "Greenfield / New Venture"
 
         # Pick recommended or first loan scenario if credit-linked
         if is_credit_linked and fin_struct and fin_struct.loan_scenarios:
@@ -316,6 +341,17 @@ class DPRService:
                 if k in narrative and v:
                     narrative[k] = v
 
+        user_monthly_income = (
+            float(request.monthly_income)
+            if getattr(request, "monthly_income", None) is not None
+            else (round(float(request.current_income) / 12.0, 2) if request.current_income and request.current_income > 0 else None)
+        )
+        user_requested_loan = (
+            float(request.requested_financing)
+            if getattr(request, "requested_financing", None) is not None
+            else (float(request.loan_amount_requested) if getattr(request, "loan_amount_requested", None) is not None else None)
+        )
+
         # ---------------------------------------------------------------------
         # 9. Assemble Canonical 13 Sections
         # ---------------------------------------------------------------------
@@ -325,15 +361,21 @@ class DPRService:
             promoter_name=promoter_name,
             business_type=request.business_type,
             sub_type=request.sub_type,
+            sector=resolved_sector,
+            activity=resolved_activity,
+            stage=resolved_stage,
             location_district=resolved_dname,
             location_state=resolved_sname,
             total_project_cost=total_cost,
             recommended_program_code=target_program_code,
             recommended_program_name=program_title,
             promoter_contribution_amount=promoter_equity,
+            user_promoter_contribution_amount=user_promoter_amount,
             bank_loan_amount=bank_loan,
             eligible_subsidy_amount=subsidy_amount,
             monthly_emi=monthly_emi,
+            monthly_income=user_monthly_income,
+            requested_financing_amount=user_requested_loan,
             executive_narrative=str(narrative.get("executive_narrative", "")),
             provenance="BACKEND DETERMINISTIC CALCULATION + AI INTERPRETATION",
         )
@@ -438,26 +480,40 @@ class DPRService:
         )
 
         # Section 9: Government Support
+        prog = program_repository.get_by_code(db, program_code=target_program_code)
+        owning_ministry = prog.owning_ministry if prog and prog.owning_ministry else "Government of India"
+        nodal_agency = prog.nodal_agency if prog and prog.nodal_agency else "Not specified by authoritative programme data"
+        prog_category = prog.primary_type if prog and prog.primary_type else (fin_struct.primary_type if fin_struct else "Credit & Capital Support")
+
+        statutory_conditions: List[str] = []
+        if fin_struct and fin_struct.is_financing_applicable:
+            statutory_conditions.append(f"Sanctioned credit must be disbursed through participating Scheduled Commercial Banks or financial institutions under {program_title} guidelines.")
+            statutory_conditions.append("Applicant must satisfy Udyam registration and statutory compliance norms of the administrative ministry.")
+            if subsidy_amount > 0:
+                statutory_conditions.append("Statutory promoter margin money must be deposited in bank project account prior to release of first loan tranche.")
+                statutory_conditions.append("Government subsidy lock-in and adjustment subject to physical inspection and verification by the nodal agency.")
+            if fin_struct.capital_structure and fin_struct.capital_structure.credit_guarantee_eligible:
+                statutory_conditions.append("Credit guarantee risk coverage applies under scheme norms; collateral-free lending without third-party guarantee.")
+        else:
+            statutory_conditions.append(f"Statutory benefit and capability support provided as per {program_title} nodal guidelines.")
+            statutory_conditions.append("Direct operational compliance monitored by the administrative nodal agency.")
+
         gov_section = DPRGovernmentSupport(
             program_code=target_program_code,
             program_name=program_title,
-            ministry="Ministry of Micro, Small & Medium Enterprises" if "PMEGP" in target_program_code else "Government of India",
-            program_category=fin_struct.primary_type if fin_struct else "Credit & Capital Support",
-            is_credit_linked=fin_struct.is_financing_applicable if fin_struct else True,
+            ministry=owning_ministry,
+            nodal_agency=nodal_agency,
+            program_category=prog_category,
+            is_credit_linked=fin_struct.is_financing_applicable if fin_struct else False,
             eligible_subsidy_rate_pct=subsidy_pct,
             eligible_subsidy_amount=subsidy_amount,
             max_subsidy_allowed=fin_struct.financial_constraints.max_subsidy_amount if fin_struct else None,
             eligible_criteria_met=[
                 f"Applicant meets statutory profile criteria for {program_title}",
-                f"Project outlay of INR {total_cost:,.2f} is within statutory financing ceiling",
-                f"Location in {resolved_dname} ({request.location_type or 'URBAN'}) satisfies scheme guidelines",
+                f"Project outlay of INR {total_cost:,.2f} evaluated under statutory programme guidelines",
+                f"Location in {resolved_dname} ({request.location_type or 'URBAN'}) satisfies scheme jurisdiction",
             ],
-            mandatory_statutory_conditions=[
-                "Sanctioned loan must be disbursed through a participating Scheduled Commercial Bank",
-                "Promoter contribution must be fully deposited in bank project account prior to release",
-                "Udyam registration and physical unit verification mandatory prior to subsidy lock-in release",
-            ],
-            nodal_agency="KVIC / KVIB / DIC" if "PMEGP" in target_program_code else "Lending Partner Bank",
+            mandatory_statutory_conditions=statutory_conditions,
             provenance="GOVERNMENT / DATASET DERIVED + BACKEND DETERMINISTIC CALCULATION",
         )
 
@@ -475,6 +531,10 @@ class DPRService:
             total_project_cost=total_cost,
             promoter_equity_amount=promoter_equity,
             promoter_equity_pct=promoter_equity_pct,
+            user_promoter_contribution_amount=user_promoter_amount,
+            user_promoter_contribution_pct=user_promoter_pct,
+            requested_financing_amount=user_requested_loan,
+            programme_promoter_note=programme_promoter_note,
             initial_bank_loan=initial_bank_loan,
             net_bank_loan_exposure=net_effective_debt if net_effective_debt is not None else initial_bank_loan,
             term_loan_amount=term_loan,
@@ -507,6 +567,12 @@ class DPRService:
             annual_debt_service=annual_debt_service,
             total_interest_payable=total_interest,
             total_debt_outflow=round((net_effective_debt or initial_bank_loan or 0.0) + total_interest, 2) if is_credit_linked else 0.0,
+            monthly_income=user_monthly_income,
+            repayment_capacity_commentary=(
+                "Deterministic repayment capacity evaluated against verified income."
+                if user_monthly_income
+                else "Not calculated from available verified data. Enter current income in Business Profile to compute debt serviceability."
+            ),
             is_market_linked=is_market_linked,
             is_benchmark_assumption=is_benchmark_assumption,
             rate_type=rate_type,
@@ -540,45 +606,21 @@ class DPRService:
             provenance="MODELLED INDICATOR + AI INTERPRETATION",
         )
 
-        # Section 13: Implementation Schedule
-        raw_milestones = narrative.get("milestones", [])
-        milestones: List[DPRMilestoneItem] = []
-        for m in raw_milestones:
-            if isinstance(m, dict):
-                milestones.append(
-                    DPRMilestoneItem(
-                        phase_number=int(m.get("phase_number", 1)),
-                        month_range=str(m.get("month_range", "Month 1")),
-                        activity=str(m.get("activity", "Project Milestone")),
-                        critical_deliverable=str(m.get("critical_deliverable", "Milestone Deliverable")),
-                    )
-                )
+        # Section 13: Implementation Schedule (Dynamic, Business-Specific & Stage-Aware)
+        dynamic_milestones, dynamic_critical_notes = cls._generate_dynamic_milestones(
+            request=request,
+            program_name=program_title,
+            is_credit_linked=is_credit_linked,
+        )
 
         impl_section = DPRImplementationPlan(
-            milestones=milestones,
-            critical_path_notes=list(narrative.get("critical_path_notes", [])),
+            milestones=dynamic_milestones,
+            critical_path_notes=dynamic_critical_notes,
             provenance="AI INTERPRETATION",
         )
 
-        # Auxiliary Section: Illustrative Operating Assumptions
-        illustrative_assumptions = DPRIllustrativeAssumptions(
-            capacity_utilization_schedule=list(
-                narrative.get("capacity_utilization_schedule", ["Year 1: 60%", "Year 2: 70%", "Year 3: 80%"])
-            ),
-            working_capital_cycle_days=int(narrative.get("working_capital_cycle_days", 45)),
-            operating_expense_benchmarks=list(
-                narrative.get("operating_expense_benchmarks", [
-                    "Raw materials & consumables: 55-65% of revenue",
-                    "Direct labor & wages: 12-15% of revenue",
-                    "Power, utilities & overheads: 5-8% of revenue",
-                ])
-            ),
-            break_even_commentary=str(
-                narrative.get("break_even_commentary", "Indicative break-even typically achievable between 50-60% capacity utilization.")
-            ),
-            disclaimer="Illustrative assumption — validate with actual business records, quotations and local market checks.",
-            provenance="ILLUSTRATIVE ASSUMPTION",
-        )
+        # Auxiliary Section: Illustrative Operating Assumptions (Dynamic by Sector & Activity)
+        illustrative_assumptions = cls._generate_dynamic_operating_assumptions(request=request)
 
         # Auxiliary Section: Research Gaps
         research_gaps = DPRResearchGaps(
@@ -594,6 +636,9 @@ class DPRService:
             promoter_name=promoter_name,
             business_type=request.business_type,
             sub_type=request.sub_type,
+            sector=resolved_sector,
+            activity=resolved_activity,
+            stage=resolved_stage,
             district_name=resolved_dname,
             state_name=resolved_sname,
             lg_dt_code=request.lg_dt_code,
@@ -622,49 +667,31 @@ class DPRService:
         cls,
         db: Session,
         request: DPRRequest,
-        resolved_sname: str,
     ) -> str:
-        """Resolve program code from explicit user selection or authoritative recommendation."""
+        """Resolve program code from explicit user selection. NEVER AUTO-SELECT."""
+        # 1. Resolve by program_id if provided
+        if getattr(request, "selected_program_id", None):
+            prog_by_id = program_repository.get_by_id(db, program_id=request.selected_program_id)
+            if prog_by_id:
+                return prog_by_id.program_code
+
+        # 2. Resolve by program_code if provided
         if request.selected_program_code and request.selected_program_code.strip():
             raw_code = request.selected_program_code.strip().upper()
             code = KNOWN_PROGRAM_ALIASES.get(raw_code, raw_code)
-            # Verify exists in database
             prog = program_repository.get_by_code(db, program_code=code)
             if prog:
                 return prog.program_code
-            logger.warning("Selected program_code '%s' not found in DB. Running recommendation engine.", code)
-
-        # Run authoritative recommendation engine
-        try:
-            user_prof = UserProfile(
-                state=resolved_sname or request.state_name or "Uttar Pradesh",
-                district=request.district_name,
-                is_rural=(request.location_type or "").upper() == "RURAL",
-                social_category=(request.category or "GENERAL").upper(),
-                gender=(request.gender or "MALE").upper(),
-                is_differently_abled=request.is_differently_abled or False,
-                is_ex_serviceman=request.is_ex_serviceman or False,
-                education_level=(request.education_level or "GRADUATE").upper(),
-                annual_income=request.current_income or 300000.0,
-                project_cost=request.estimated_capital,
-                requested_loan_amount=request.estimated_capital * 0.75,
-                sector=request.business_type,
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Selected government program '{request.selected_program_code}' not found in authoritative dataset.",
             )
 
-            rec_req = RecommendationRequest(
-                profile=user_prof,
-                target_financing_need=request.estimated_capital * 0.75,
-                top_k=3,
-            )
-            rec_res = RecommendationService.generate_recommendations(db=db, request=rec_req)
-            if rec_res and rec_res.recommendations:
-                top_rec = rec_res.recommendations[0]
-                return top_rec.program_code
-        except Exception as e:
-            logger.warning("Recommendation engine fallback in DPRService: %s", e)
-
-        # Resilient fallback if no recommendation generated
-        return "PMEGP_NEW"
+        # 3. If no programme selected, strictly reject with required prompt
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Select a government programme to calculate programme-specific financing and generate the DPR.",
+        )
 
     @classmethod
     def _calculate_authoritative_financials(
@@ -673,26 +700,512 @@ class DPRService:
         program_code: str,
         request: DPRRequest,
     ) -> Optional[FinancialStructuringResponse]:
-        """Execute deterministic financial structuring service for resolved scheme."""
+        """Execute deterministic financial structuring service for resolved scheme with null-preserving semantics."""
         try:
-            monthly_inc = (request.current_income / 12.0) if request.current_income and request.current_income > 0 else 50000.0
-            fin_req = FinancialStructuringRequest(
-                program_code=program_code,
-                project_cost=request.estimated_capital,
-                requested_loan_amount=request.estimated_capital * 0.75,
-                monthly_income=monthly_inc,
-                monthly_expenses=monthly_inc * 0.40,
-                existing_monthly_emi=request.existing_debt or 0.0,
-                applicant_social_category=request.category or "General",
-                applicant_gender=request.gender or "Male",
-                is_rural=(request.location_type or "").upper() == "RURAL",
-                is_new_business=True,
-                preferred_tenure_months=60,
+            # 1. Resolve monthly income strictly from verified user profile/request (zero fabricated ₹50,000)
+            monthly_inc: Optional[float] = None
+            if getattr(request, "monthly_income", None) is not None and request.monthly_income > 0:
+                monthly_inc = float(request.monthly_income)
+            elif request.current_income is not None and request.current_income > 0:
+                monthly_inc = round(float(request.current_income) / 12.0, 2)
+
+            # 2. Resolve requested financing / loan needed strictly from user input (zero 75% fabrication)
+            loan_needed: Optional[float] = None
+            if getattr(request, "requested_financing", None) is not None and request.requested_financing > 0:
+                loan_needed = float(request.requested_financing)
+            elif getattr(request, "loan_amount_requested", None) is not None and request.loan_amount_requested > 0:
+                loan_needed = float(request.loan_amount_requested)
+            elif request.user_promoter_contribution is not None:
+                loan_needed = max(0.0, float(request.estimated_capital) - float(request.user_promoter_contribution))
+
+            is_new = (request.stage or "").lower() not in ["operational", "expansion", "growth", "existing"]
+
+            # If verified monthly income is available, run standard financial structuring engine
+            if monthly_inc is not None:
+                fin_req = FinancialStructuringRequest(
+                    program_code=program_code,
+                    project_cost=request.estimated_capital,
+                    requested_loan_amount=loan_needed,
+                    monthly_income=monthly_inc,
+                    monthly_expenses=0.0,  # Zero fabricated 40%
+                    existing_monthly_emi=request.existing_debt or 0.0,
+                    applicant_social_category=request.category or "General",
+                    applicant_gender=request.gender or "Male",
+                    is_rural=(request.location_type or "").upper() == "RURAL",
+                    is_new_business=is_new,
+                    preferred_tenure_months=60,
+                )
+                return FinancialStructuringService.calculate_structure(db=db, request=fin_req)
+
+            # If monthly income is unsupplied:
+            # Do NOT invent ₹50,000 monthly income or 40% expenses.
+            # Calculate capital structure, subsidy, and loan terms deterministically from authoritative database,
+            # while leaving repayment capacity / DTI as None ("Not calculated from available verified data.")
+            program = program_repository.get_by_code(db, program_code=program_code)
+            if not program:
+                return None
+
+            eval_prog = ProgramEligibilityAdapter.adapt(program)
+            is_financing = (
+                program.credit_details is not None
+                or eval_prog.max_loan_amount is not None
+                or eval_prog.min_loan_amount is not None
+                or program.subsidy_details is not None
+                or eval_prog.max_subsidy_amount is not None
+                or eval_prog.subsidy_percentage is not None
+                or program.guarantee_details is not None
+                or eval_prog.max_guarantee_limit is not None
             )
-            return FinancialStructuringService.calculate_structure(db=db, request=fin_req)
+
+            prog_name = getattr(program, "program_name", getattr(program, "name", "Government Programme"))
+            if not is_financing:
+                return FinancialStructuringResponse(
+                    program_id=program.id,
+                    program_code=program.program_code,
+                    program_name=prog_name,
+                    primary_type=program.primary_type,
+                    actionability_type=program.actionability_type,
+                    is_financing_applicable=False,
+                    assistance_summary=program.benefit_summary or f"Statutory capability and enterprise development support under {prog_name}.",
+                    capital_structure=None,
+                    debt_health=None,
+                    loan_scenarios=[],
+                    financial_constraints=StatutoryFinancialBounds(
+                        min_loan_amount=eval_prog.min_loan_amount,
+                        max_loan_amount=eval_prog.max_loan_amount,
+                        min_project_cost=eval_prog.min_project_cost,
+                        max_project_cost=eval_prog.max_project_cost,
+                        subsidy_percentage=eval_prog.subsidy_percentage,
+                        max_subsidy_amount=eval_prog.max_subsidy_amount,
+                        promoter_contribution_percentage=None,
+                        tenure_years_max=FinancialStructuringService._get_tenure_years_max(program, eval_prog),
+                        moratorium_months=FinancialStructuringService._get_moratorium_months(program, eval_prog),
+                        interest_rate_min=eval_prog.interest_rate_min,
+                        interest_rate_max=eval_prog.interest_rate_max,
+                    ),
+                    statutory_checklist=[],
+                    warnings=["Statutory eligibility must be verified independently."],
+                )
+
+            # Resolve promoter margin
+            promoter_margin_pct, is_statutory_margin, _ = FinancialStructuringService._resolve_promoter_margin(
+                program=program, eval_prog=eval_prog
+            )
+            promoter_amount = (
+                round(request.estimated_capital * (promoter_margin_pct / 100.0), 2)
+                if promoter_margin_pct is not None
+                else None
+            )
+
+            # Resolve subsidy
+            subsidy_amount, subsidy_pct, is_conditional, disbursement_type, _ = FinancialStructuringService._calculate_subsidy(
+                program=program,
+                eval_prog=eval_prog,
+                project_cost=request.estimated_capital,
+                request=FinancialStructuringRequest(
+                    program_code=program_code,
+                    project_cost=request.estimated_capital,
+                    requested_loan_amount=loan_needed,
+                    monthly_income=1.0,  # nominal, unused for subsidy
+                ),
+            )
+
+            # Resolve debt
+            initial_bank_loan, net_effective_debt, _ = FinancialStructuringService._calculate_debt(
+                program=program,
+                eval_prog=eval_prog,
+                project_cost=request.estimated_capital,
+                promoter_amount=promoter_amount,
+                subsidy_amount=subsidy_amount,
+                requested_loan=loan_needed,
+            )
+
+            # Compile CapitalStructureBreakdown
+            cap_struct = CapitalStructureBreakdown(
+                project_cost=request.estimated_capital,
+                promoter_contribution_pct=promoter_margin_pct,
+                promoter_contribution_amount=promoter_amount,
+                is_statutory_margin=is_statutory_margin,
+                subsidy_pct=subsidy_pct,
+                subsidy_amount=subsidy_amount,
+                is_conditional_subsidy=is_conditional,
+                subsidy_disbursement_type=disbursement_type,
+                initial_bank_loan=initial_bank_loan,
+                net_effective_debt=net_effective_debt,
+                credit_guarantee_eligible=False,
+                guarantee_coverage_pct=None,
+                guaranteed_amount=None,
+                annual_guarantee_fee_pct=None,
+            )
+
+            # Resolve loan scenarios (without DTI since monthly_income is None)
+            loan_principal = net_effective_debt if (net_effective_debt and net_effective_debt > 0) else initial_bank_loan
+            neutral_health = DebtHealthIndicators(
+                monthly_income=1.0,
+                existing_monthly_emi=0.0,
+                uncommitted_surplus=0.0,
+                affordable_emi_cap=0.0,
+                existing_dti_pct=0.0,
+                dti_health_category="UNVERIFIED",
+            )
+            scenarios = FinancialStructuringService._generate_loan_scenarios(
+                program=program,
+                eval_prog=eval_prog,
+                loan_principal=loan_principal,
+                debt_health=neutral_health,
+                preferred_tenure_months=60,
+                warnings=[],
+            )
+
+            return FinancialStructuringResponse(
+                program_id=program.id,
+                program_code=program.program_code,
+                program_name=prog_name,
+                primary_type=program.primary_type,
+                actionability_type=program.actionability_type,
+                is_financing_applicable=True,
+                assistance_summary=program.benefit_summary or f"Financial assistance under {prog_name}.",
+                capital_structure=cap_struct,
+                debt_health=None,  # Preserves None when user income is unsupplied
+                loan_scenarios=scenarios,
+                financial_constraints=StatutoryFinancialBounds(
+                    min_loan_amount=eval_prog.min_loan_amount,
+                    max_loan_amount=eval_prog.max_loan_amount,
+                    min_project_cost=eval_prog.min_project_cost,
+                    max_project_cost=eval_prog.max_project_cost,
+                    subsidy_percentage=eval_prog.subsidy_percentage,
+                    max_subsidy_amount=eval_prog.max_subsidy_amount,
+                    promoter_contribution_percentage=promoter_margin_pct,
+                    tenure_years_max=FinancialStructuringService._get_tenure_years_max(program, eval_prog),
+                    moratorium_months=FinancialStructuringService._get_moratorium_months(program, eval_prog),
+                    interest_rate_min=eval_prog.interest_rate_min,
+                    interest_rate_max=eval_prog.interest_rate_max,
+                ),
+                statutory_checklist=[],
+                warnings=["Income unverified in Business Profile: debt health indicators not calculated."],
+            )
         except Exception as e:
             logger.error("Financial structuring failed for program '%s': %s", program_code, e, exc_info=True)
             return None
+
+    @classmethod
+    def _generate_dynamic_milestones(
+        cls,
+        request: DPRRequest,
+        program_name: str,
+        is_credit_linked: bool,
+    ) -> Tuple[List[DPRMilestoneItem], List[str]]:
+        """Generate a dynamic, business-specific, stage-aware implementation roadmap."""
+        btype = (request.business_type or "General Enterprise").lower()
+        sector = (request.sector or "").lower()
+        stage = (request.stage or "").lower()
+        activity = request.activity or request.sub_type or request.business_type
+        is_existing = any(k in stage for k in ["operational", "expansion", "growth", "existing"])
+
+        milestones: List[DPRMilestoneItem] = []
+        critical_notes: List[str] = []
+
+        if is_existing:
+            milestones = [
+                DPRMilestoneItem(
+                    phase_number=1,
+                    month_range="Month 1",
+                    activity=f"Operational audit & credit appraisal under {program_name}",
+                    critical_deliverable="Bank sanction letter for business expansion and credit line approval",
+                    provenance="GOVERNMENT / PROGRAMME REQUIREMENT",
+                ),
+                DPRMilestoneItem(
+                    phase_number=2,
+                    month_range="Month 1-2",
+                    activity=f"Procurement of upgraded equipment / bulk inventory replenishment for {activity}",
+                    critical_deliverable="Capital asset procurement receipts and commercial delivery verification",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=3,
+                    month_range="Month 2-3",
+                    activity="Capacity integration, workflow scaling & technician training",
+                    critical_deliverable="Enhanced daily throughput and quality standard operating audit",
+                    provenance="AI INTERPRETATION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=4,
+                    month_range="Month 3-4",
+                    activity="Customer base expansion, wholesale contract fulfillments & debt servicing",
+                    critical_deliverable="Incremental revenue realization and timely monthly debt servicing",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+            ]
+            critical_notes = [
+                "Maintaining continuity of existing operations during capacity upgrade is essential.",
+                "Timely utilization of sanctioned credit line prevents supply bottlenecks.",
+            ]
+        elif "retail" in btype or "trade" in btype or "trading" in sector or "shop" in btype:
+            milestones = [
+                DPRMilestoneItem(
+                    phase_number=1,
+                    month_range="Month 1",
+                    activity="Commercial shop lease finalization, Trade License & Udyam registration",
+                    critical_deliverable="Registered commercial lease deed, GSTIN / Trade certificate",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=2,
+                    month_range="Month 1-2",
+                    activity=f"Credit sanction under {program_name} & promoter margin deposit",
+                    critical_deliverable="Bank loan disbursement and business operative bank account setup",
+                    provenance="GOVERNMENT / PROGRAMME REQUIREMENT",
+                ),
+                DPRMilestoneItem(
+                    phase_number=3,
+                    month_range="Month 2",
+                    activity="Storefront fit-out, display shelving, and POS billing system setup",
+                    critical_deliverable="Fitted retail counter, barcode scanner & computerized accounting",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=4,
+                    month_range="Month 2-3",
+                    activity=f"Wholesale distributor onboarding & initial merchandise stock intake for {activity}",
+                    critical_deliverable="Authorized distributor agreements and catalogued retail inventory",
+                    provenance="AI INTERPRETATION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=5,
+                    month_range="Month 3",
+                    activity="Commercial store opening & local neighborhood marketing campaign",
+                    critical_deliverable="Initial retail sales transactions and customer walk-ins",
+                    provenance="AI INTERPRETATION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=6,
+                    month_range="Month 4-5",
+                    activity="Inventory replenishment cycle stabilization and prompt loan EMI servicing",
+                    critical_deliverable="Target monthly retail turnover achieved and healthy debt service track",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+            ]
+            critical_notes = [
+                "Securing high-visibility commercial location with fair rental terms is the primary success driver.",
+                "Careful working capital management to avoid dead stock during initial months.",
+            ]
+        elif "service" in btype or "it" in btype or "repair" in btype or "consult" in btype or "service" in sector:
+            milestones = [
+                DPRMilestoneItem(
+                    phase_number=1,
+                    month_range="Month 1",
+                    activity="Professional registration, Udyam enrollment & commercial space arrangement",
+                    critical_deliverable="Udyam certificate, professional tax registration & workspace lease",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=2,
+                    month_range="Month 1-2",
+                    activity=f"Statutory credit appraisal under {program_name} & capital disbursement",
+                    critical_deliverable="Sanction letter, equity margin crediting & operational bank account",
+                    provenance="GOVERNMENT / PROGRAMME REQUIREMENT",
+                ),
+                DPRMilestoneItem(
+                    phase_number=3,
+                    month_range="Month 2",
+                    activity=f"IT hardware, diagnostic tooling & software licenses provisioning for {activity}",
+                    critical_deliverable="Operational workstations, diagnostic apparatus & digital tools ready",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=4,
+                    month_range="Month 2-3",
+                    activity="Standard operating procedures (SOP) formulation & pilot service testing",
+                    critical_deliverable="Service delivery protocols established and initial pilot test sign-off",
+                    provenance="AI INTERPRETATION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=5,
+                    month_range="Month 3-4",
+                    activity="Commercial service launch, corporate outreach & client onboarding",
+                    critical_deliverable="First active corporate service contracts and billing initiated",
+                    provenance="AI INTERPRETATION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=6,
+                    month_range="Month 5-6",
+                    activity="Service capacity stabilization, annual maintenance contracts & loan repayment",
+                    critical_deliverable="Predictable recurring service cashflow and timely monthly debt servicing",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+            ]
+            critical_notes = [
+                "Maintaining service SLA response times is critical for retaining first-generation clients.",
+                "Digital presence and local word-of-mouth drive low-cost customer acquisition.",
+            ]
+        elif "food" in btype or "agro" in btype or "bakery" in btype:
+            milestones = [
+                DPRMilestoneItem(
+                    phase_number=1,
+                    month_range="Month 1",
+                    activity="Premises arrangement, Udyam registration & FSSAI license application",
+                    critical_deliverable="Site possession deed, FSSAI filing acknowledgement & Udyam certificate",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=2,
+                    month_range="Month 1-2",
+                    activity=f"Bank loan sanction under {program_name} & promoter margin deposit",
+                    critical_deliverable="Bank sanction letter and first tranche disbursement",
+                    provenance="GOVERNMENT / PROGRAMME REQUIREMENT",
+                ),
+                DPRMilestoneItem(
+                    phase_number=3,
+                    month_range="Month 2-3",
+                    activity="Hygienic facility fit-out, 3-phase power energization & processing equipment delivery",
+                    critical_deliverable="Sanitized food-grade processing area and equipment dispatch receipts",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=4,
+                    month_range="Month 3-4",
+                    activity=f"Machinery installation, trial batch processing & shelf-life testing for {activity}",
+                    critical_deliverable="Successful test batch, tamper-evident packaging run & FSSAI compliance",
+                    provenance="AI INTERPRETATION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=5,
+                    month_range="Month 4-5",
+                    activity="Farm-gate raw material tie-ups, distributor onboarding & commercial launch",
+                    critical_deliverable="Raw material intake contracts and dispatch to initial 15 stockists",
+                    provenance="AI INTERPRETATION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=6,
+                    month_range="Month 5-6",
+                    activity="Production run-rate stabilization, retailer re-orders & loan repayment servicing",
+                    critical_deliverable="Steady monthly processing output and timely debt service track record",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+            ]
+            critical_notes = [
+                "Strict adherence to FSSAI food hygiene protocols is non-negotiable prior to commercial sale.",
+                "Managing raw material seasonality through local farm-gate supply agreements.",
+            ]
+        else:
+            # Manufacturing / Textiles / Engineering / General
+            milestones = [
+                DPRMilestoneItem(
+                    phase_number=1,
+                    month_range="Month 1",
+                    activity="Site possession, Udyam registration & statutory local clearances",
+                    critical_deliverable="Site title/lease, Udyam registration, and local consent certificates",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=2,
+                    month_range="Month 1-2",
+                    activity=f"Bank loan appraisal, sanction under {program_name} & margin equity deposit",
+                    critical_deliverable="Formal loan sanction letter and project account crediting",
+                    provenance="GOVERNMENT / PROGRAMME REQUIREMENT",
+                ),
+                DPRMilestoneItem(
+                    phase_number=3,
+                    month_range="Month 2-3",
+                    activity=f"Workshop layout preparation, power connection & primary machinery orders for {activity}",
+                    critical_deliverable="Sanctioned power load and machinery dispatch receipts",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=4,
+                    month_range="Month 3-4",
+                    activity="Machinery erection, tooling calibration, trial run & quality inspection",
+                    critical_deliverable="Accurate sample product batches and quality test certification",
+                    provenance="AI INTERPRETATION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=5,
+                    month_range="Month 4-5",
+                    activity="Raw material procurement agreements, commercial run & distributor dispatch",
+                    critical_deliverable="Executed vendor agreements and first commercial order dispatch",
+                    provenance="AI INTERPRETATION",
+                ),
+                DPRMilestoneItem(
+                    phase_number=6,
+                    month_range="Month 5-6",
+                    activity="Plant capacity utilization stabilization, workforce training & loan EMI servicing",
+                    critical_deliverable="Target monthly output achieved and timely loan debt servicing",
+                    provenance="ILLUSTRATIVE ASSUMPTION",
+                ),
+            ]
+            critical_notes = [
+                "Timely release of machinery loan tranches prevents delivery bottlenecks.",
+                "Quality consistency across initial commercial batches determines repeat orders.",
+            ]
+
+        return milestones, critical_notes
+
+    @classmethod
+    def _generate_dynamic_operating_assumptions(
+        cls,
+        request: DPRRequest,
+    ) -> DPRIllustrativeAssumptions:
+        """Generate dynamic, clearly-labelled operating assumptions with zero fabricated constants."""
+        btype = (request.business_type or "General Enterprise").lower()
+        sector = (request.sector or "").lower()
+
+        if "retail" in btype or "trade" in btype or "trading" in sector or "shop" in btype:
+            benchmarks = [
+                "Wholesale merchandise procurement & stock intake: 65-75% of sales turnover",
+                "Commercial retail shop lease, municipal charges & power: 8-12% of sales turnover",
+                "Storefront sales personnel & local logistics: 6-10% of sales turnover",
+                "Packaging, loss buffer & local promotions: 2-4% of sales turnover",
+            ]
+            capacity_schedule = [
+                "Year 1: 55% Sales Velocity (Footfall generation & stock turnover tuning)",
+                "Year 2: 75% Sales Velocity (Established neighborhood client base)",
+                "Year 3: 85% Sales Velocity (Optimal retail inventory turn plateau)",
+            ]
+        elif "service" in btype or "it" in btype or "repair" in btype or "consult" in btype or "service" in sector:
+            benchmarks = [
+                "Technical personnel, staff salaries & professional remuneration: 40-50% of gross receipts",
+                "Software licenses, diagnostic tools & digital infrastructure: 8-12% of gross receipts",
+                "Commercial office lease, electricity & administrative overheads: 10-15% of gross receipts",
+                "Client acquisition, marketing & promotional travel: 5-8% of gross receipts",
+            ]
+            capacity_schedule = [
+                "Year 1: 50% Billable Utilization (Client onboarding & market positioning)",
+                "Year 2: 70% Billable Utilization (Repeat corporate clients & capacity scaling)",
+                "Year 3: 85% Billable Utilization (Optimal operating plateau & retainer contracts)",
+            ]
+        elif "food" in btype or "agro" in btype or "bakery" in btype:
+            benchmarks = [
+                "Farm-gate agricultural produce & perishable raw inputs: 55-65% of gross revenue",
+                "Processing labor, hygiene supervisors & packing staff: 10-14% of gross revenue",
+                "Electricity, cold chain storage & packaging consumables: 8-12% of gross revenue",
+                "Distribution freight, transit buffer & spoilage allowance: 4-6% of gross revenue",
+            ]
+            capacity_schedule = [
+                "Year 1: 55% Processing Capacity (Batch stabilization & distributor trial)",
+                "Year 2: 70% Processing Capacity (Regional retail network expansion)",
+                "Year 3: 80% Processing Capacity (Optimal processing plateau)",
+            ]
+        else:
+            benchmarks = [
+                "Primary raw materials, metals & components: 50-60% of manufacturing revenue",
+                "Skilled machine operators, technicians & direct wages: 12-18% of revenue",
+                "Industrial power, fuel, lubricants & consumables: 8-12% of revenue",
+                "Machine maintenance, tooling wear & factory overheads: 3-5% of revenue",
+            ]
+            capacity_schedule = [
+                "Year 1: 55% Installed Plant Capacity (Trial run & workforce training)",
+                "Year 2: 70% Installed Plant Capacity (Commercial supply stabilization)",
+                "Year 3: 80% Installed Plant Capacity (Optimal manufacturing plateau)",
+            ]
+
+        return DPRIllustrativeAssumptions(
+            capacity_utilization_schedule=capacity_schedule,
+            working_capital_cycle_days=None,  # Zero hardcoded 45 days
+            operating_expense_benchmarks=benchmarks,
+            break_even_commentary="Not calculated from available verified data. Illustrative assumption — validate with actual business records, quotations and local market checks.",
+            disclaimer="Illustrative assumption — validate with actual business records, quotations and local market checks.",
+            provenance="ILLUSTRATIVE ASSUMPTION",
+        )
 
     @classmethod
     def _generate_amortization_schedule(

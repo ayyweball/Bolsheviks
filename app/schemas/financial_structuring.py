@@ -130,7 +130,7 @@ class FinancialStructuringResponse(BaseModel):
     assistance_summary: str = Field(..., description="High-level financial or capability assistance description")
     
     capital_structure: Optional[CapitalStructureBreakdown] = Field(None, description="Component equity, grant, and debt stack")
-    debt_health: DebtHealthIndicators = Field(..., description="Applicant repayment capacity and DTI indicators")
+    debt_health: Optional[DebtHealthIndicators] = Field(None, description="Applicant repayment capacity and DTI indicators")
     loan_scenarios: List[RepaymentScenarioItem] = Field(default_factory=list, description="Amortization scenarios within statutory bounds")
     financial_constraints: StatutoryFinancialBounds = Field(..., description="Statutory programme parameters from PostgreSQL")
     

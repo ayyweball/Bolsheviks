@@ -34,7 +34,14 @@ export async function POST(req: Request) {
       additionalContext,
       targetProgramCode,
       programCode,
-      businessId: existingBusinessId
+      businessId: existingBusinessId,
+      district,
+      state,
+      promoterContribution,
+      user_promoter_contribution,
+      stage,
+      sector,
+      activity
     } = body;
 
     if (!businessType || !estimatedCapital) {
@@ -43,10 +50,12 @@ export async function POST(req: Request) {
 
     // 1. Resolve existing business or create only if none exists
     let businessId = existingBusinessId;
+    let existingBus: any = null;
     if (!businessId) {
       const existing = await resolvePrimaryBusiness(user.id);
       if (existing) {
         businessId = existing.id;
+        existingBus = existing;
       } else {
         const newBus = await prisma.business.create({
           data: {
@@ -61,8 +70,27 @@ export async function POST(req: Request) {
           }
         });
         businessId = newBus.id;
+        existingBus = newBus;
       }
+    } else {
+      existingBus = await prisma.business.findUnique({ where: { id: businessId } });
     }
+
+    const resolvedDistrict = district || user.district;
+    const resolvedState = state || user.state;
+    if (!resolvedDistrict) {
+      return NextResponse.json({ error: 'District is required for accurate advisory generation' }, { status: 400 });
+    }
+
+    const resolvedPromoter = user_promoter_contribution !== undefined && user_promoter_contribution !== null
+      ? Number(user_promoter_contribution)
+      : (promoterContribution !== undefined && promoterContribution !== null
+        ? Number(promoterContribution)
+        : (existingBus?.promoterContribution != null ? Number(existingBus.promoterContribution) : undefined));
+
+    const resolvedStage = stage || existingBus?.stage || undefined;
+    const resolvedSector = sector || existingBus?.sector || undefined;
+    const resolvedActivity = activity || existingBus?.activity || subType || undefined;
 
     // 2. Call Claude AI Business Plan generator service
     const planResult = await generateBusinessPlanAI({
@@ -73,8 +101,8 @@ export async function POST(req: Request) {
       currentIncome: currentIncome ? parseFloat(currentIncome) : 0,
       estimatedCapital: parseFloat(estimatedCapital),
       existingDebt: existingDebt ? parseFloat(existingDebt) : 0,
-      state: user.state || 'Uttar Pradesh',
-      district: user.district || 'Lucknow',
+      state: resolvedState || 'India',
+      district: resolvedDistrict,
       additionalContext,
       language: user.language || 'en'
     });
@@ -90,11 +118,16 @@ export async function POST(req: Request) {
         experience_level: experienceLevel || 'Experienced',
         target_market: targetMarket,
         estimated_capital: parseFloat(estimatedCapital),
-        current_income: currentIncome ? parseFloat(currentIncome) : 360000,
-        existing_debt: existingDebt ? parseFloat(existingDebt) : 0,
-        district_name: user.district || 'Varanasi',
-        state_name: user.state || 'Uttar Pradesh',
+        current_income: currentIncome ? parseFloat(currentIncome) : undefined,
+        existing_debt: existingDebt ? parseFloat(existingDebt) : undefined,
+        district_name: resolvedDistrict,
+        state_name: resolvedState || undefined,
         selected_program_code: selectedProgramCode,
+        user_promoter_contribution: resolvedPromoter,
+        stage: resolvedStage,
+        sector: resolvedSector,
+        activity: resolvedActivity,
+        project_name: businessType ? `${businessType} Enterprise` : undefined,
       });
     } catch (dprErr) {
       console.warn('Backend DPR generation non-critical warning:', dprErr);

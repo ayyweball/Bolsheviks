@@ -141,6 +141,7 @@ def test_provenance_tags_on_all_sections(db_session: Session):
         district_name="Varanasi",
         state_name="Uttar Pradesh",
         estimated_capital=800000.0,
+        selected_program_code="PMEGP_NEW",
     )
     res = asyncio.run(dpr_service.generate_dpr(db=db_session, request=req))
 
@@ -196,6 +197,7 @@ def test_anti_fabrication_assertions(client: TestClient):
         "district_name": "Varanasi",
         "state_name": "Uttar Pradesh",
         "estimated_capital": 500000.0,
+        "selected_program_code": "PMEGP_NEW",
     }
     response = client.post("/api/v1/advisory/dpr", json=payload)
     assert response.status_code == 200

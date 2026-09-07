@@ -35,10 +35,16 @@ class DPRRequest(BaseModel):
     target_market: Optional[str] = Field(None, description="Target customer segment")
     experience_level: Optional[str] = Field(None, description="Years of experience")
     
-    # Financial Inputs
     estimated_capital: float = Field(..., gt=0, description="Total planned project cost in INR")
     current_income: Optional[float] = Field(None, description="Current annual revenue in INR")
+    monthly_income: Optional[float] = Field(None, description="Verified monthly income in INR (USER PROVIDED)")
     existing_debt: Optional[float] = Field(None, description="Current outstanding debt in INR")
+    user_promoter_contribution: Optional[float] = Field(None, description="User-entered promoter equity contribution from profile (USER PROVIDED)")
+    requested_financing: Optional[float] = Field(None, description="User-requested debt financing amount in INR (USER PROVIDED)")
+    loan_amount_requested: Optional[float] = Field(None, description="Alias for requested_financing")
+    sector: Optional[str] = Field(None, description="Broad enterprise sector (e.g. 'Manufacturing', 'Services', 'Trading', 'Agriculture')")
+    activity: Optional[str] = Field(None, description="Specific enterprise operational activity")
+    stage: Optional[str] = Field(None, description="Enterprise lifecycle stage (e.g. 'Early Stage', 'Operational', 'Expansion', 'Greenfield')")
     
     # Location
     district_name: str = Field(..., description="Target district name")
@@ -56,6 +62,9 @@ class DPRRequest(BaseModel):
     # Scheme Selection Override
     selected_program_code: Optional[str] = Field(
         None, description="Explicit government program code override (e.g. 'PMEGP_NEW', 'MUDRA_KISHORE')"
+    )
+    selected_program_id: Optional[int] = Field(
+        None, description="Explicit government program database ID override"
     )
     
     # User-Edited Qualitative Overrides
@@ -76,15 +85,21 @@ class DPRExecutiveSummary(BaseModel):
     promoter_name: str
     business_type: str
     sub_type: Optional[str] = None
+    sector: Optional[str] = None
+    activity: Optional[str] = None
+    stage: Optional[str] = None
     location_district: str
     location_state: str
     total_project_cost: float
     recommended_program_code: str
     recommended_program_name: str
     promoter_contribution_amount: Optional[float] = None
-    bank_loan_amount: float
-    eligible_subsidy_amount: float
-    monthly_emi: float
+    user_promoter_contribution_amount: Optional[float] = None
+    bank_loan_amount: Optional[float] = None
+    eligible_subsidy_amount: Optional[float] = None
+    monthly_emi: Optional[float] = None
+    monthly_income: Optional[float] = None
+    requested_financing_amount: Optional[float] = None
     executive_narrative: str
     provenance: str = "BACKEND DETERMINISTIC CALCULATION + AI INTERPRETATION"
 
@@ -206,6 +221,9 @@ class DPRCapitalStructure(BaseModel):
     total_project_cost: float
     promoter_equity_amount: Optional[float] = None
     promoter_equity_pct: Optional[float] = None
+    user_promoter_contribution_amount: Optional[float] = None
+    user_promoter_contribution_pct: Optional[float] = None
+    programme_promoter_note: Optional[str] = None
     initial_bank_loan: Optional[float] = None
     net_bank_loan_exposure: Optional[float] = None
     term_loan_amount: Optional[float] = None
@@ -214,6 +232,7 @@ class DPRCapitalStructure(BaseModel):
     working_capital_pct: Optional[float] = None
     government_subsidy_amount: float = 0.0
     government_subsidy_pct: Optional[float] = None
+    requested_financing_amount: Optional[float] = None
     is_statutorily_balanced: bool = False
     structuring_notes: List[str] = Field(default_factory=list)
     provenance: str = "BACKEND DETERMINISTIC CALCULATION"
@@ -242,6 +261,8 @@ class DPRFinancialAssumptions(BaseModel):
     annual_debt_service: float = 0.0
     total_interest_payable: float = 0.0
     total_debt_outflow: float = 0.0
+    monthly_income: Optional[float] = None
+    repayment_capacity_commentary: Optional[str] = None
     is_market_linked: bool = False
     is_benchmark_assumption: bool = False
     rate_type: Optional[str] = None
@@ -275,6 +296,7 @@ class DPRMilestoneItem(BaseModel):
     month_range: str
     activity: str
     critical_deliverable: str
+    provenance: Optional[str] = Field("ILLUSTRATIVE ASSUMPTION", description="Milestone provenance classification")
 
 
 class DPRImplementationPlan(BaseModel):
@@ -295,7 +317,7 @@ class DPRIllustrativeAssumptions(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     capacity_utilization_schedule: List[str]
-    working_capital_cycle_days: int
+    working_capital_cycle_days: Optional[int] = Field(None, description="Working capital cycle days if verified, else None")
     operating_expense_benchmarks: List[str]
     break_even_commentary: str
     disclaimer: str = Field(
@@ -331,6 +353,9 @@ class DPRResponse(BaseModel):
     promoter_name: str
     business_type: str
     sub_type: Optional[str] = None
+    sector: Optional[str] = None
+    activity: Optional[str] = None
+    stage: Optional[str] = None
     district_name: str
     state_name: str
     lg_dt_code: Optional[str] = None

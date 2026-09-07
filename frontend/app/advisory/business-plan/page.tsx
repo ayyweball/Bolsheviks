@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import Navbar from '@/components/Navbar';
 import Sidebar from '@/components/Sidebar';
 import { useLanguage } from '@/lib/i18n/useLanguage';
@@ -32,6 +33,7 @@ import { DPRResponse, ComparableDistrictItem } from '@/lib/api-client';
 const PROVENANCE_STYLES: Record<string, string> = {
   'USER PROVIDED': 'bg-blue-50 text-blue-700 border-blue-200',
   'GOVERNMENT / DATASET DERIVED': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'GOVERNMENT / PROGRAMME REQUIREMENT': 'bg-emerald-50 text-emerald-700 border-emerald-200',
   'MODELLED INDICATOR': 'bg-purple-50 text-purple-700 border-purple-200',
   'AI INTERPRETATION': 'bg-amber-50 text-amber-700 border-amber-200',
   'ILLUSTRATIVE ASSUMPTION': 'bg-orange-50 text-orange-700 border-orange-200',
@@ -62,9 +64,10 @@ const STEPS = [
   { id: 11, name: 'Review & DPR', icon: FileText, desc: 'Audit Trail & Full DPR Generation' },
 ];
 
-export default function RebuiltDPRBuilderPage() {
+function RebuiltDPRBuilderContent() {
   const { t } = useLanguage();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [currentStep, setCurrentStep] = useState(1);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -72,25 +75,53 @@ export default function RebuiltDPRBuilderPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Form Profile State
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    businessId: string;
+    projectName: string;
+    promoterName: string;
+    businessType: string;
+    subType: string;
+    sector: string;
+    activity: string;
+    stage: string;
+    experienceLevel: string;
+    targetMarket: string;
+    estimatedCapital: number | null;
+    promoterContribution: string;
+    currentIncome: number | null;
+    existingDebt: number | null;
+    districtName: string;
+    stateName: string;
+    locationType: string;
+    category: string;
+    gender: string;
+    educationLevel: string;
+    selectedProgramCode: string;
+  }>({
     businessId: '',
-    projectName: 'Banarasi Handloom Weaving Unit',
-    promoterName: 'Entrepreneur',
-    businessType: 'Handloom & Textiles',
-    subType: 'Zari Brocade Weaving',
+    projectName: '',
+    promoterName: '',
+    businessType: '',
+    subType: '',
+    sector: '',
+    activity: '',
+    stage: '',
     experienceLevel: '5+ Years Experienced',
     targetMarket: 'Regional Wholesale & Direct Retail',
-    estimatedCapital: 1000000,
-    currentIncome: 360000,
-    existingDebt: 0,
-    districtName: 'Varanasi',
-    stateName: 'Uttar Pradesh',
+    estimatedCapital: null,
+    promoterContribution: '',
+    currentIncome: null,
+    existingDebt: null,
+    districtName: '',
+    stateName: '',
     locationType: 'URBAN',
     category: 'GENERAL',
     gender: 'MALE',
     educationLevel: 'GRADUATE',
-    selectedProgramCode: 'PMEGP_NEW',
+    selectedProgramCode: searchParams.get('programCode') || '',
   });
+
+  const [hasSavedProfile, setHasSavedProfile] = useState<boolean | null>(null);
 
   // Generated DPR State
   const [dprResult, setDprResult] = useState<DPRResponse | null>(null);
@@ -106,29 +137,48 @@ export default function RebuiltDPRBuilderPage() {
         const res = await fetch('/api/user/profile');
         if (res.ok) {
           const data = await res.json();
-          if (data.user || data.business) {
-            const u = data.user || {};
-            const b = data.business || {};
-            setForm((prev) => ({
-              ...prev,
-              businessId: b.id || '',
-              projectName: b.name || `${b.sector || b.type || prev.businessType} Enterprise`,
-              promoterName: u.name || prev.promoterName,
-              businessType: b.sector || b.type || prev.businessType,
-              subType: b.description || prev.subType,
-              districtName: b.district || u.district || prev.districtName,
-              stateName: b.state || u.state || prev.stateName,
-              locationType: b.isRural ? 'RURAL' : 'URBAN',
-              category: u.category || prev.category,
-              gender: u.gender || prev.gender,
-              estimatedCapital: b.projectCost || b.estimatedCapital || prev.estimatedCapital,
-              currentIncome: b.monthlyIncome ? b.monthlyIncome * 12 : (b.annualTurnover || prev.currentIncome),
-              existingDebt: b.existingDebt || prev.existingDebt,
-            }));
+          const u = data.user || {};
+          const b = data.business || {};
+          const hasBusinessData = Boolean(b && (b.id || b.type || b.sector || b.activity || b.projectCost));
+          setHasSavedProfile(hasBusinessData);
+
+          if (hasBusinessData) {
+            setForm((prev) => {
+              const bType = b.type || b.activity || b.sector || '';
+              const sType = b.activity || b.description || '';
+              const dName = u.district || b.district || '';
+              const sName = u.state || b.state || '';
+              const capital = b.projectCost != null ? Number(b.projectCost) : (b.estimatedCapital != null ? Number(b.estimatedCapital) : null);
+              const income = b.monthlyIncome != null ? Number(b.monthlyIncome) * 12 : (b.annualTurnover != null ? Number(b.annualTurnover) : null);
+              const debt = b.existingDebt != null ? Number(b.existingDebt) : null;
+              return {
+                ...prev,
+                businessId: b.id || '',
+                projectName: b.name || (bType ? `${bType} Enterprise` : prev.projectName),
+                promoterName: u.name || prev.promoterName || 'Entrepreneur',
+                businessType: bType || prev.businessType,
+                subType: sType || prev.subType,
+                sector: b.sector || prev.sector,
+                activity: b.activity || prev.activity,
+                stage: b.stage || (b.isNewBusiness === false ? 'Expansion' : 'Greenfield / New Venture'),
+                districtName: dName || prev.districtName,
+                stateName: sName || prev.stateName,
+                locationType: b.isRural || u.isRural ? 'RURAL' : 'URBAN',
+                category: u.socialCategory || u.category || prev.category,
+                gender: u.gender || prev.gender,
+                estimatedCapital: capital,
+                promoterContribution: b.promoterContribution != null ? String(b.promoterContribution) : '',
+                currentIncome: income,
+                existingDebt: debt,
+              };
+            });
           }
+        } else {
+          setHasSavedProfile(false);
         }
       } catch (err) {
         console.warn('Could not load profile in DPR builder:', err);
+        setHasSavedProfile(false);
       } finally {
         setLoadingProfile(false);
       }
@@ -136,21 +186,46 @@ export default function RebuiltDPRBuilderPage() {
     loadSavedProfile();
   }, []);
 
+  // Sync selectedProgramCode from URL searchParams if provided
+  useEffect(() => {
+    const code = searchParams.get('programCode');
+    if (code) {
+      setForm((prev) => ({ ...prev, selectedProgramCode: code }));
+    }
+  }, [searchParams]);
+
   // Fetch or trigger DPR synthesis
   const fetchDPR = async () => {
     setGeneratingDPR(true);
     setError(null);
     try {
+      if (hasSavedProfile === false) {
+        throw new Error('Complete Business Profile to generate a user-specific DPR.');
+      }
+      if (!form.districtName || !form.businessType) {
+        throw new Error('Please ensure District and Business Type are configured in your Business Profile.');
+      }
+      if (form.estimatedCapital == null || form.estimatedCapital <= 0) {
+        throw new Error('Please configure Total Project Cost / Estimated Capital in your Business Profile to generate a DPR.');
+      }
+      if (!form.selectedProgramCode) {
+        throw new Error('Select a government programme to calculate programme-specific financing and generate the DPR.');
+      }
+
       const payload = {
-        project_name: form.projectName,
-        promoter_name: form.promoterName,
+        project_name: form.projectName || `${form.businessType} Enterprise`,
+        promoter_name: form.promoterName || 'Entrepreneur',
         business_type: form.businessType,
-        sub_type: form.subType,
+        sub_type: form.subType || form.activity,
+        sector: form.sector || undefined,
+        activity: form.activity || form.subType || undefined,
+        stage: form.stage || undefined,
         target_market: form.targetMarket,
         experience_level: form.experienceLevel,
         estimated_capital: Number(form.estimatedCapital),
-        current_income: Number(form.currentIncome),
-        existing_debt: Number(form.existingDebt),
+        user_promoter_contribution: form.promoterContribution ? Number(form.promoterContribution) : undefined,
+        current_income: form.currentIncome != null ? Number(form.currentIncome) : undefined,
+        existing_debt: form.existingDebt != null ? Number(form.existingDebt) : undefined,
         district_name: form.districtName,
         state_name: form.stateName,
         location_type: form.locationType,
@@ -184,10 +259,10 @@ export default function RebuiltDPRBuilderPage() {
 
   // Trigger initial DPR synthesis when entering review or clicking generate
   useEffect(() => {
-    if (!dprResult && !generatingDPR && currentStep >= 2) {
+    if (!dprResult && !generatingDPR && currentStep >= 2 && form.selectedProgramCode) {
       fetchDPR();
     }
-  }, [currentStep]);
+  }, [currentStep, form.selectedProgramCode]);
 
   const handleQualitativeChange = (field: string, val: string) => {
     setQualitativeEdits((prev) => ({ ...prev, [field]: val }));
@@ -294,90 +369,232 @@ export default function RebuiltDPRBuilderPage() {
                 <div className="flex items-center justify-between border-b pb-4">
                   <div>
                     <h2 className="text-lg font-bold text-slate-900">Step 1: Business & Promoter Overview</h2>
-                    <p className="text-xs text-slate-500">Auto-prefilled from your verified entrepreneur profile.</p>
+                    <p className="text-xs text-slate-500">Authoritative parameters loaded directly from your verified Business Profile.</p>
                   </div>
                   <ProvenanceBadge tag="USER PROVIDED" />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Project Name</label>
-                    <input
-                      type="text"
-                      value={form.projectName}
-                      onChange={(e) => setForm({ ...form, projectName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500"
-                    />
+                {loadingProfile ? (
+                  <div className="p-12 text-center bg-slate-50 rounded-2xl border border-slate-200">
+                    <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-3" />
+                    <p className="text-sm font-semibold text-slate-600">Loading Business Profile...</p>
                   </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Promoter Name</label>
-                    <input
-                      type="text"
-                      value={form.promoterName}
-                      onChange={(e) => setForm({ ...form, promoterName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500"
-                    />
+                ) : hasSavedProfile === false ? (
+                  <div className="p-8 bg-amber-50 border border-amber-200 rounded-2xl text-center space-y-4">
+                    <AlertCircle className="w-10 h-10 text-amber-600 mx-auto" />
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">Complete Business Profile</h3>
+                      <p className="text-sm text-slate-600 mt-1">
+                        Complete Business Profile to generate a user-specific DPR.
+                      </p>
+                    </div>
+                    <Link
+                      href="/dashboard/profile"
+                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition shadow-xs"
+                    >
+                      <span>Set Up Business Profile</span>
+                      <ExternalLink className="w-4 h-4" />
+                    </Link>
                   </div>
+                ) : (
+                  /* Single Source of Truth Summary Card */
+                  <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-5 h-5 text-indigo-600" />
+                        <div>
+                          <h3 className="text-xs font-bold text-slate-900">Using your saved Business Profile</h3>
+                          <p className="text-[11px] text-slate-500">
+                            Single source of truth. Downstream DPR generation uses these verified values without duplicate data entry.
+                          </p>
+                        </div>
+                      </div>
+                      <Link
+                        href="/dashboard/profile"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-xs font-bold text-indigo-700 hover:bg-indigo-50 transition shadow-xs shrink-0"
+                      >
+                        <span>Edit Business Profile</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
 
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Primary Business Domain</label>
-                    <input
-                      type="text"
-                      value={form.businessType}
-                      onChange={(e) => setForm({ ...form, businessType: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500"
-                    />
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 text-xs">
+                      <div className="p-3 bg-white rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Business Domain</span>
+                        <span className="text-sm font-black text-slate-900 mt-0.5 block truncate" title={form.businessType}>
+                          {form.businessType || 'Not configured'}
+                        </span>
+                        <span className="text-[9px] text-indigo-600 font-semibold">USER PROVIDED</span>
+                      </div>
+
+                      <div className="p-3 bg-white rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Activity / Sub-Type</span>
+                        <span className="text-sm font-black text-slate-900 mt-0.5 block truncate" title={form.activity || form.subType}>
+                          {form.activity || form.subType || 'General'}
+                        </span>
+                        <span className="text-[9px] text-indigo-600 font-semibold">USER PROVIDED</span>
+                      </div>
+
+                      <div className="p-3 bg-white rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Sector</span>
+                        <span className="text-sm font-black text-slate-900 mt-0.5 block truncate">
+                          {form.sector || 'Manufacturing'}
+                        </span>
+                        <span className="text-[9px] text-indigo-600 font-semibold">USER PROVIDED</span>
+                      </div>
+
+                      <div className="p-3 bg-white rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Enterprise Stage</span>
+                        <span className="text-sm font-black text-slate-900 mt-0.5 block truncate">
+                          {form.stage || 'Operational'}
+                        </span>
+                        <span className="text-[9px] text-indigo-600 font-semibold">USER PROVIDED</span>
+                      </div>
+
+                      <div className="p-3 bg-white rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Total Project Cost</span>
+                        <span className="text-sm font-black text-slate-900 mt-0.5 block">
+                          {form.estimatedCapital != null ? `₹${Number(form.estimatedCapital).toLocaleString('en-IN')}` : 'Not specified in profile'}
+                        </span>
+                        <span className="text-[9px] text-indigo-600 font-semibold">USER PROVIDED</span>
+                      </div>
+
+                      <div className="p-3 bg-white rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Promoter Contribution</span>
+                        <span className="text-sm font-black text-slate-900 mt-0.5 block">
+                          {form.promoterContribution ? `₹${Number(form.promoterContribution).toLocaleString('en-IN')}` : 'Not specified in profile'}
+                        </span>
+                        <span className="text-[9px] text-indigo-600 font-semibold">USER PROVIDED</span>
+                      </div>
+
+                      <div className="p-3 bg-white rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Annual / Monthly Revenue</span>
+                        <span className="text-sm font-black text-emerald-700 mt-0.5 block">
+                          {form.currentIncome != null ? `₹${Number(form.currentIncome).toLocaleString('en-IN')}` : 'Not specified in profile'}
+                        </span>
+                        <span className="text-[9px] text-emerald-600 font-semibold">USER PROVIDED</span>
+                      </div>
+
+                      <div className="p-3 bg-white rounded-xl border border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase">Existing Debt</span>
+                        <span className="text-sm font-black text-slate-800 mt-0.5 block">
+                          {form.existingDebt != null ? `₹${Number(form.existingDebt).toLocaleString('en-IN')}` : 'None'}
+                        </span>
+                        <span className="text-[9px] text-indigo-600 font-semibold">USER PROVIDED</span>
+                      </div>
+
+                      <div className="p-3 bg-white rounded-xl border border-slate-200 col-span-2 sm:col-span-3 lg:col-span-4 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-400 block uppercase">Jurisdiction & Promoter</span>
+                          <span className="text-xs font-bold text-slate-900 mt-0.5">
+                            {form.promoterName} • {form.districtName}, {form.stateName}
+                          </span>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                            {form.locationType}
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
+                            {form.category} • {form.gender}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
+                )}
 
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Specific Sub-Type / Trade</label>
-                    <input
-                      type="text"
-                      value={form.subType}
-                      onChange={(e) => setForm({ ...form, subType: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500"
-                    />
+                {/* Page-Specific Formulation Decisions (Category B) */}
+                <div className="space-y-4 pt-2">
+                  {!form.selectedProgramCode && (
+                    <div className="p-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Please select a target government programme to structure your DPR.</span>
+                      </div>
+                      <Link
+                        href="/advisory/financial"
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg transition shrink-0"
+                      >
+                        Select Programme
+                      </Link>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold text-slate-900 uppercase">Page-Specific Formulation Decisions</h3>
+                    {form.selectedProgramCode && (
+                      <Link
+                        href="/advisory/financial"
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold"
+                      >
+                        Change Programme in Scheme Advisory &rarr;
+                      </Link>
+                    )}
                   </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Target Government Assistance Programme</label>
+                      <select
+                        value={form.selectedProgramCode}
+                        onChange={(e) => {
+                          setForm({ ...form, selectedProgramCode: e.target.value });
+                          setDprResult(null);
+                        }}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500 bg-white"
+                      >
+                        <option value="">-- Select a Government Programme --</option>
+                        <option value="PMEGP_NEW">Prime Minister Employment Generation Programme (PMEGP)</option>
+                        <option value="PMFME">PM Formalisation of Micro Food Processing Enterprises (PMFME)</option>
+                        <option value="STANDUP_INDIA">Stand-Up India Scheme (SC/ST & Women)</option>
+                        <option value="PM_MUDRA_KISHORE">Pradhan Mantri MUDRA Yojana (Kishore - ₹50k to ₹5L)</option>
+                        <option value="PM_MUDRA_TARUN">Pradhan Mantri MUDRA Yojana (Tarun - ₹5L to ₹20L)</option>
+                        <option value="CGTMSE">Credit Guarantee Fund Trust for Micro & Small Enterprises (CGTMSE)</option>
+                      </select>
+                    </div>
 
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">District</label>
-                    <input
-                      type="text"
-                      value={form.districtName}
-                      onChange={(e) => setForm({ ...form, districtName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500"
-                    />
-                  </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Target Market Orientation</label>
+                      <select
+                        value={form.targetMarket}
+                        onChange={(e) => setForm({ ...form, targetMarket: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500 bg-white"
+                      >
+                        <option value="Regional Wholesale & Direct Retail">Regional Wholesale & Direct Retail</option>
+                        <option value="Local Village / District Community">Local Village / District Community</option>
+                        <option value="Statewide Commercial Distribution">Statewide Commercial Distribution</option>
+                        <option value="National & Institutional Supply">National & Institutional Supply</option>
+                        <option value="Export / International Trade">Export / International Trade</option>
+                      </select>
+                    </div>
 
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">State</label>
-                    <input
-                      type="text"
-                      value={form.stateName}
-                      onChange={(e) => setForm({ ...form, stateName: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500"
-                    />
-                  </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Entrepreneur Experience Level</label>
+                      <select
+                        value={form.experienceLevel}
+                        onChange={(e) => setForm({ ...form, experienceLevel: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500 bg-white"
+                      >
+                        <option value="Beginner / Aspiring (< 1 Year)">Beginner / Aspiring (&lt; 1 Year)</option>
+                        <option value="1-3 Years Developing Enterprise">1-3 Years Developing Enterprise</option>
+                        <option value="5+ Years Experienced">5+ Years Experienced</option>
+                        <option value="Master Craftsman / Industrialist">Master Craftsman / Industrialist</option>
+                      </select>
+                    </div>
 
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Total Project Capital Outlay (₹)</label>
-                    <input
-                      type="number"
-                      value={form.estimatedCapital}
-                      onChange={(e) => setForm({ ...form, estimatedCapital: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-1">Annual Personal/Business Revenue (₹)</label>
-                    <input
-                      type="number"
-                      value={form.currentIncome}
-                      onChange={(e) => setForm({ ...form, currentIncome: Number(e.target.value) })}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500"
-                    />
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">Highest Education Qualification</label>
+                      <select
+                        value={form.educationLevel}
+                        onChange={(e) => setForm({ ...form, educationLevel: e.target.value })}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-indigo-500 bg-white"
+                      >
+                        <option value="UNDER_MATRIC">Under Matriculation</option>
+                        <option value="10TH_PASS">10th Standard / Matriculate</option>
+                        <option value="12TH_PASS">12th Standard / Higher Secondary</option>
+                        <option value="GRADUATE">Graduate / Diploma</option>
+                        <option value="POST_GRADUATE">Post-Graduate / Professional</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -750,16 +967,38 @@ export default function RebuiltDPRBuilderPage() {
                 {dprResult ? (
                   <div className="space-y-4">
                     {/* Capital Breakdown Cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                       <div className="p-3 bg-slate-50 border rounded-xl">
                         <div className="text-[10px] text-slate-500 uppercase font-semibold">Total Project Cost</div>
                         <div className="text-lg font-bold text-slate-900 mt-1">
                           ₹{dprResult.capital_structure.total_project_cost.toLocaleString()}
                         </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">Total capital outlay</div>
+                      </div>
+
+                      <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl">
+                        <div className="text-[10px] text-amber-800 uppercase font-semibold">User Promoter Equity</div>
+                        {dprResult.capital_structure.user_promoter_contribution_amount != null ? (
+                          <>
+                            <div className="text-lg font-bold text-amber-900 mt-1">
+                              ₹{dprResult.capital_structure.user_promoter_contribution_amount.toLocaleString()}
+                            </div>
+                            <div className="text-[10px] text-amber-700 font-medium mt-0.5">
+                              {dprResult.capital_structure.user_promoter_contribution_pct != null
+                                ? `${dprResult.capital_structure.user_promoter_contribution_pct}% profile equity`
+                                : 'USER PROVIDED'}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-[11px] text-amber-800 font-medium mt-1 leading-snug">
+                            Not specified in Business Profile
+                          </div>
+                        )}
+                        <div className="text-[9px] text-amber-700 font-semibold mt-0.5">USER PROVIDED</div>
                       </div>
 
                       <div className="p-3 bg-slate-50 border rounded-xl">
-                        <div className="text-[10px] text-slate-500 uppercase font-semibold">Promoter Contribution</div>
+                        <div className="text-[10px] text-slate-500 uppercase font-semibold">Programme Margin Mandate</div>
                         {dprResult.capital_structure.promoter_equity_amount != null ? (
                           <>
                             <div className="text-lg font-bold text-blue-700 mt-1">
@@ -767,15 +1006,16 @@ export default function RebuiltDPRBuilderPage() {
                             </div>
                             <div className="text-[10px] text-slate-500 mt-0.5">
                               {dprResult.capital_structure.promoter_equity_pct != null
-                                ? `${dprResult.capital_structure.promoter_equity_pct}% margin`
-                                : 'Self-equity'}
+                                ? `${dprResult.capital_structure.promoter_equity_pct}% statutory margin`
+                                : 'Mandatory margin'}
                             </div>
                           </>
                         ) : (
-                          <div className="text-[11px] text-amber-700 font-medium mt-1 leading-snug">
+                          <div className="text-[10px] text-slate-600 font-medium mt-1 leading-snug">
                             Not specified by authoritative programme data
                           </div>
                         )}
+                        <div className="text-[9px] text-slate-500 font-semibold mt-0.5">GOVERNMENT / DATASET DERIVED</div>
                       </div>
 
                       <div className="p-3 bg-slate-50 border rounded-xl">
@@ -792,9 +1032,10 @@ export default function RebuiltDPRBuilderPage() {
                             Gross loan: ₹{dprResult.capital_structure.initial_bank_loan.toLocaleString()}
                           </div>
                         )}
+                        <div className="text-[9px] text-indigo-600 font-semibold mt-0.5">SCHEDULED BANK LOAN</div>
                       </div>
 
-                      <div className="p-3 bg-slate-50 border rounded-xl">
+                      <div className="p-3 bg-slate-50 border rounded-xl col-span-2 sm:col-span-1">
                         <div className="text-[10px] text-slate-500 uppercase font-semibold">Monthly EMI (P+I)</div>
                         {dprResult.government_support.is_credit_linked && dprResult.financial_assumptions.annual_interest_rate_pct != null ? (
                           <>
@@ -805,8 +1046,8 @@ export default function RebuiltDPRBuilderPage() {
                               {dprResult.financial_assumptions.loan_tenure_months} mos @ {dprResult.financial_assumptions.annual_interest_rate_pct}%
                               {dprResult.financial_assumptions.is_benchmark_assumption ? ' benchmark' : ''}
                             </div>
-                            <div className="text-[9px] text-indigo-600 font-semibold mt-0.5">
-                              {dprResult.financial_assumptions.rate_display_text || 'Market-linked / lender-dependent'}
+                            <div className="text-[9px] text-indigo-600 font-semibold mt-0.5 truncate">
+                              {dprResult.financial_assumptions.rate_display_text || 'Market-linked'}
                             </div>
                           </>
                         ) : (
@@ -943,6 +1184,7 @@ export default function RebuiltDPRBuilderPage() {
                         <div className="flex-1 text-xs">
                           <div className="flex items-center justify-between">
                             <span className="font-bold text-slate-900">{m.month_range}: {m.activity}</span>
+                            {m.provenance && <ProvenanceBadge tag={m.provenance} />}
                           </div>
                           <p className="text-slate-500 text-[11px] mt-0.5"><span className="font-semibold text-slate-700">Deliverable:</span> {m.critical_deliverable}</p>
                         </div>
@@ -994,7 +1236,12 @@ export default function RebuiltDPRBuilderPage() {
                         "{dprResult.illustrative_assumptions.disclaimer}"
                       </p>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-slate-700 text-[11px] pt-1">
-                        <div><span className="font-semibold">Working Capital Cycle:</span> {dprResult.illustrative_assumptions.working_capital_cycle_days} Days</div>
+                        <div>
+                          <span className="font-semibold">Working Capital Cycle:</span>{' '}
+                          {dprResult.illustrative_assumptions.working_capital_cycle_days != null
+                            ? `${dprResult.illustrative_assumptions.working_capital_cycle_days} Days`
+                            : 'Not calculated from available verified data.'}
+                        </div>
                         <div><span className="font-semibold">Break-Even Point:</span> {dprResult.illustrative_assumptions.break_even_commentary}</div>
                       </div>
                     </div>
@@ -1077,5 +1324,22 @@ export default function RebuiltDPRBuilderPage() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function RebuiltDPRBuilderPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-8">
+          <div className="flex items-center gap-2 text-slate-500 text-sm">
+            <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+            <span>Loading DPR Builder...</span>
+          </div>
+        </div>
+      }
+    >
+      <RebuiltDPRBuilderContent />
+    </Suspense>
   );
 }

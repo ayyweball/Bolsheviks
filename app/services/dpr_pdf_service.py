@@ -709,10 +709,10 @@ class DPRPDFService:
         meta_rows = [
             ("Project Name:", dpr.project_name or "Enterprise Formulation"),
             ("Promoter Name:", dpr.promoter_name or "Entrepreneur"),
+            ("Enterprise Stage:", getattr(dpr, "stage", None) or "Greenfield / Operational"),
             ("Business Activity:", f"{dpr.business_type} ({dpr.sub_type or 'General Trade'})"),
             ("Location Jurisdiction:", f"{dpr.district_name}, {dpr.state_name}"),
             ("Recommended Scheme:", es.recommended_program_name or gov.program_name or "Statutory Programme"),
-            ("Statutory Authority / Ministry:", gov.ministry or "Ministry of MSME"),
             ("Report ID & Generation Date:", f"{dpr.report_id}  •  {dpr.generated_at[:10]}"),
         ]
 
@@ -1073,12 +1073,19 @@ class DPRPDFService:
 
         cap_rows = [
             ["Total Planned Project Cost", cls.format_currency(cs.total_project_cost), "100.0%", "USER PROVIDED"],
-            ["Promoter Contribution", prom_equity_val, prom_equity_pct_val, "GOVERNMENT / DATASET DERIVED"],
+        ]
+        if getattr(cs, 'user_promoter_contribution_amount', None) is not None:
+            user_prom_pct = getattr(cs, 'user_promoter_contribution_pct', None)
+            pct_str = f"{user_prom_pct:.1f}%" if user_prom_pct is not None else "—"
+            cap_rows.append(["User Promoter Equity (Profile)", cls.format_currency(cs.user_promoter_contribution_amount), pct_str, "USER PROVIDED"])
+
+        cap_rows.extend([
+            ["Programme Promoter Contribution", prom_equity_val, prom_equity_pct_val, "GOVERNMENT / DATASET DERIVED"],
             ["Government Subsidy", gov_sub_val, gov_sub_pct_val, "BACKEND DETERMINISTIC CALCULATION"],
             ["Net Bank Loan Exposure", net_bank_val, "Balance", "BACKEND DETERMINISTIC CALCULATION"],
             ["Term Loan Component", term_loan_val, f"{cs.term_loan_pct}%" if cs.term_loan_pct else "—", "BACKEND DETERMINISTIC CALCULATION"],
             ["Working Capital Component", working_cap_val, f"{cs.working_capital_pct}%" if cs.working_capital_pct else "—", "BACKEND DETERMINISTIC CALCULATION"],
-        ]
+        ])
         canvas.draw_table(
             headers=["Financing Component", "Amount", "Share", "Data Provenance"],
             rows=cap_rows,
@@ -1172,7 +1179,7 @@ class DPRPDFService:
             canvas.draw_callout_box(
                 title="Authoritative Capital Allocation Notice",
                 text=(
-                    "Promoter Contribution: Not specified by authoritative programme data.\n"
+                    "Programme-defined promoter contribution: Not specified by authoritative programme data.\n"
                     "Status: Partial authoritative allocation. Slices reflect only authoritatively mandated figures. "
                     "Zero promoter equity percentage (such as 5% or 10%) has been fabricated."
                 ),
@@ -1299,7 +1306,7 @@ class DPRPDFService:
         ia = dpr.illustrative_assumptions
         ia_rows = [
             ["Capacity Utilization Schedule", ", ".join(ia.capacity_utilization_schedule) if ia.capacity_utilization_schedule else "Standard ramp-up"],
-            ["Working Capital Cycle Days", f"{ia.working_capital_cycle_days} Days" if ia.working_capital_cycle_days else "30-45 Days"],
+            ["Working Capital Cycle Days", f"{ia.working_capital_cycle_days} Days" if ia.working_capital_cycle_days is not None else "Not calculated from available verified data."],
             ["Operating Expense Benchmarks", ", ".join(ia.operating_expense_benchmarks) if ia.operating_expense_benchmarks else "Standard Industry Benchmarks"],
         ]
         canvas.draw_table(

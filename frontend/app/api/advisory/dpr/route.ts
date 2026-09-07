@@ -9,65 +9,86 @@ export async function POST(req: Request) {
     const user = await getCurrentUser();
     const body = await req.json();
 
-    let resolvedDistrict = body.district_name || body.district;
-    let resolvedState = body.state_name || body.state;
-    let resolvedBusinessType = body.business_type || body.sector;
-    let resolvedCapital = Number(body.estimated_capital || body.project_cost || body.investmentInPlant || 1000000);
-    let resolvedIncome = Number(body.current_income || body.annual_turnover || body.monthly_income ? (body.monthly_income * 12) : 360000);
-    let promoterName = body.promoter_name || user?.name || 'Entrepreneur';
-
-    // If user is logged in, attempt to enrich with primary business profile if fields are missing
-    if (user && (!resolvedDistrict || !resolvedBusinessType)) {
+    let primaryBiz: any = null;
+    if (user) {
       try {
-        const primaryBiz: any = await resolvePrimaryBusiness(user.id);
-        if (primaryBiz) {
-          if (!resolvedDistrict) resolvedDistrict = primaryBiz.district || user.district;
-          if (!resolvedState) resolvedState = primaryBiz.state || user.state;
-          if (!resolvedBusinessType) resolvedBusinessType = primaryBiz.sector || primaryBiz.type;
-          if (!body.estimated_capital && (primaryBiz.projectCost || primaryBiz.estimatedCapital)) {
-            resolvedCapital = Number(primaryBiz.projectCost || primaryBiz.estimatedCapital);
-          }
-          if (!body.current_income && (primaryBiz.annualTurnover || primaryBiz.monthlyIncome)) {
-            resolvedIncome = Number(primaryBiz.annualTurnover || (primaryBiz.monthlyIncome * 12));
-          }
-        }
+        primaryBiz = await resolvePrimaryBusiness(user.id);
       } catch (err) {
         console.warn('Could not resolve primary business for DPR:', err);
       }
     }
 
+    // 1. Resolve Location (Strictly from input or profile; ZERO silent Varanasi fallback)
+    const resolvedDistrict = body.district_name || body.district || primaryBiz?.district || user?.district;
+    const resolvedState = body.state_name || body.state || primaryBiz?.state || user?.state;
+
     if (!resolvedDistrict) {
-      resolvedDistrict = user?.district || 'Varanasi';
-    }
-    if (!resolvedState) {
-      resolvedState = user?.state || 'Uttar Pradesh';
-    }
-    if (!resolvedBusinessType) {
-      resolvedBusinessType = 'Handloom & Textiles';
+      return NextResponse.json(
+        { error: 'Target district is required. Please set your district in your business profile or request payload.' },
+        { status: 400 }
+      );
     }
 
-    const anyUser: any = user;
+    // 2. Resolve Business Identity (Strictly from input or profile; ZERO silent Handloom fallback)
+    const resolvedBusinessType = body.business_type || primaryBiz?.type || primaryBiz?.activity || primaryBiz?.sector;
+    if (!resolvedBusinessType) {
+      return NextResponse.json(
+        { error: 'Business type or trade title is required. Please specify business type in your profile or request payload.' },
+        { status: 400 }
+      );
+    }
+
+    // 3. Financial Inputs
+    const rawCapital = body.estimated_capital ?? body.project_cost ?? body.investmentInPlant ?? primaryBiz?.projectCost ?? primaryBiz?.estimatedCapital;
+    const resolvedCapital = Number(rawCapital);
+    if (isNaN(resolvedCapital) || resolvedCapital <= 0) {
+      return NextResponse.json(
+        { error: 'Estimated capital or project cost must be a valid positive number.' },
+        { status: 400 }
+      );
+    }
+
+    const rawIncome = body.current_income ?? body.annual_turnover ?? primaryBiz?.annualTurnover ?? (primaryBiz?.monthlyIncome ? primaryBiz.monthlyIncome * 12 : undefined);
+    const resolvedIncome = rawIncome != null && !isNaN(Number(rawIncome)) ? Number(rawIncome) : undefined;
+
+    // 4. User Promoter Contribution (Preserve exact user entry; do NOT overwrite or fabricate)
+    const rawUserPromoter = body.user_promoter_contribution ?? body.promoter_contribution ?? body.promoterContribution ?? primaryBiz?.promoterContribution;
+    const userPromoterContrib = rawUserPromoter != null && rawUserPromoter !== '' && !isNaN(Number(rawUserPromoter))
+      ? Number(rawUserPromoter)
+      : undefined;
+
+    // 5. Enterprise Lifecycle Attributes
+    const resolvedSector = body.sector || primaryBiz?.sector || undefined;
+    const resolvedActivity = body.activity || body.sub_type || primaryBiz?.activity || undefined;
+    const resolvedStage = body.stage || primaryBiz?.stage || (primaryBiz?.isNewBusiness === false ? 'Expansion' : (primaryBiz?.isNewBusiness === true ? 'Greenfield / New Venture' : undefined));
+    const promoterName = body.promoter_name || user?.name || 'Entrepreneur';
+    const projectName = body.project_name || primaryBiz?.name || `${resolvedBusinessType} Enterprise`;
+
     const dprPayload: DPRRequest = {
       user_id: user?.id,
-      business_id: body.business_id || body.businessId,
-      project_name: body.project_name || `${resolvedBusinessType} Enterprise`,
+      business_id: body.business_id || body.businessId || primaryBiz?.id,
+      project_name: projectName,
       promoter_name: promoterName,
       business_type: resolvedBusinessType,
-      sub_type: body.sub_type,
+      sub_type: body.sub_type || resolvedActivity,
+      sector: resolvedSector,
+      activity: resolvedActivity,
+      stage: resolvedStage,
+      user_promoter_contribution: userPromoterContrib,
       target_market: body.target_market,
       experience_level: body.experience_level,
       estimated_capital: resolvedCapital,
       current_income: resolvedIncome,
-      existing_debt: body.existing_debt ? Number(body.existing_debt) : undefined,
+      existing_debt: body.existing_debt != null ? Number(body.existing_debt) : (primaryBiz?.existingDebt != null ? Number(primaryBiz.existingDebt) : undefined),
       district_name: resolvedDistrict,
       state_name: resolvedState,
       lg_dt_code: body.lg_dt_code,
-      location_type: body.location_type || (body.is_rural ? 'RURAL' : 'URBAN'),
-      category: body.category || body.social_category || anyUser?.category || 'GENERAL',
-      gender: body.gender || anyUser?.gender || 'MALE',
+      location_type: body.location_type || (primaryBiz?.isRural ?? body.is_rural ? 'RURAL' : 'URBAN'),
+      category: body.category || body.social_category || user?.socialCategory || 'GENERAL',
+      gender: body.gender || user?.gender || 'MALE',
       education_level: body.education_level || 'GRADUATE',
-      is_differently_abled: body.is_differently_abled || false,
-      is_ex_serviceman: body.is_ex_serviceman || false,
+      is_differently_abled: body.is_differently_abled ?? user?.isDifferentlyAbled ?? false,
+      is_ex_serviceman: body.is_ex_serviceman ?? user?.isExServiceman ?? false,
       selected_program_code: body.selected_program_code || body.programCode,
       qualitative_overrides: body.qualitative_overrides,
     };
